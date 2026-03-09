@@ -1,3 +1,4 @@
+import React, { useState } from 'react'
 import { C, SYMBOLS } from '../constants'
 
 const dropStyle = (open) => ({
