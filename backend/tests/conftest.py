@@ -15,10 +15,7 @@ from app.models.wallet import Wallet
 from app.models.subscription import Subscription
 from app.services.auth_service import create_access_token, hash_password
 
-# ── Test database URL ────────────────────────────────────────────────────────
-TEST_DATABASE_URL = (
-    "postgresql+asyncpg://equal_test:equal_test_password@localhost:5433/equal_test_db"
-)
+TEST_DATABASE_URL = "postgresql+asyncpg://equal_test@localhost:5433/equal_test_db"
 
 test_engine = create_async_engine(TEST_DATABASE_URL, echo=False)
 TestSessionLocal = async_sessionmaker(
@@ -30,7 +27,6 @@ TestSessionLocal = async_sessionmaker(
 )
 
 
-# ── Session-scoped event loop ────────────────────────────────────────────────
 @pytest.fixture(scope="session")
 def event_loop():
     loop = asyncio.new_event_loop()
@@ -38,7 +34,6 @@ def event_loop():
     loop.close()
 
 
-# ── Create / drop tables once per session ───────────────────────────────────
 @pytest_asyncio.fixture(scope="session", autouse=True)
 async def create_tables():
     async with test_engine.begin() as conn:
@@ -48,16 +43,13 @@ async def create_tables():
         await conn.run_sync(Base.metadata.drop_all)
 
 
-# ── Per-test DB session (rolls back after each test) ────────────────────────
 @pytest_asyncio.fixture
 async def db_session() -> AsyncGenerator[AsyncSession, None]:
-    async with test_engine.begin() as conn:
-        async with TestSessionLocal(bind=conn) as session:
-            yield session
-            await session.rollback()
+    async with TestSessionLocal() as session:
+        yield session
+        await session.rollback()
 
 
-# ── Override get_db with test session ───────────────────────────────────────
 @pytest_asyncio.fixture
 async def client(db_session: AsyncSession) -> AsyncGenerator[AsyncClient, None]:
     async def override_get_db():
@@ -70,7 +62,6 @@ async def client(db_session: AsyncSession) -> AsyncGenerator[AsyncClient, None]:
     app.dependency_overrides.clear()
 
 
-# ── Registered user (no funds) ───────────────────────────────────────────────
 @pytest_asyncio.fixture
 async def registered_user(db_session: AsyncSession) -> dict:
     user = User(
@@ -89,7 +80,6 @@ async def registered_user(db_session: AsyncSession) -> dict:
     return {"user": user, "token": token, "headers": {"Authorization": f"Bearer {token}"}}
 
 
-# ── Funded user (R5 000 balance) ─────────────────────────────────────────────
 @pytest_asyncio.fixture
 async def funded_user(db_session: AsyncSession) -> dict:
     user = User(

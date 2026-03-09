@@ -3,9 +3,16 @@ import uuid
 
 
 class RegisterRequest(BaseModel):
-    email: EmailStr
+    email: str  # Use plain str instead of EmailStr
     password: str
     display_name: str | None = None
+
+    @field_validator("email")
+    @classmethod
+    def email_format(cls, v: str) -> str:
+        if "@" not in v or "." not in v.split("@")[-1]:
+            raise ValueError("Invalid email format")
+        return v.lower()
 
     @field_validator("password")
     @classmethod
@@ -16,9 +23,15 @@ class RegisterRequest(BaseModel):
 
 
 class LoginRequest(BaseModel):
-    email: EmailStr
+    email: str
     password: str
 
+    @field_validator("email")
+    @classmethod
+    def email_format(cls, v: str) -> str:
+        if "@" not in v or "." not in v.split("@")[-1]:
+            raise ValueError("Invalid email format")
+        return v.lower()
 
 class TokenResponse(BaseModel):
     access_token: str

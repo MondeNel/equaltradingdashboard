@@ -4,7 +4,7 @@ from app.services.price_service import BASE_PRICES, get_price, price_generator
 router = APIRouter(tags=["prices"])
 
 
-@router.get("/api/prices/{symbol}")
+@router.get("/api/prices/{symbol:path}")
 async def get_current_price(symbol: str):
     price = get_price(symbol)
     if price is None:

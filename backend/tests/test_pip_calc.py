@@ -63,7 +63,7 @@ def test_buy_profit_non_zar_pair():
         symbol="EUR/USD",
     )
     # 100 pips × R1 × 1 × 18.02 = R1802
-    assert pips == Decimal("1000.00")
+    assert pips == Decimal("100.00")
     assert pnl == Decimal("1802.0000")
 
 

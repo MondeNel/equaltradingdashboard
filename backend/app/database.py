@@ -1,41 +1,48 @@
-from pydantic_settings import BaseSettings, SettingsConfigDict
-from functools import lru_cache
+from typing import AsyncGenerator
+
+from sqlalchemy.ext.asyncio import (
+    AsyncSession,
+    AsyncEngine,
+    async_sessionmaker,
+    create_async_engine,
+)
+from sqlalchemy.orm import DeclarativeBase
+
+from app.config import get_settings
+
+settings = get_settings()
+
+engine: AsyncEngine = create_async_engine(
+    settings.database_url,
+    echo=False,
+    pool_pre_ping=True,
+    pool_size=10,
+    max_overflow=20,
+)
+
+AsyncSessionLocal = async_sessionmaker(
+    bind=engine,
+    class_=AsyncSession,
+    expire_on_commit=False,
+    autoflush=False,
+    autocommit=False,
+)
 
 
-class Settings(BaseSettings):
-    # Database
-    database_url: str = "postgresql+asyncpg://equal:password@localhost/equal_db"
-
-    # Redis
-    redis_url: str = "redis://localhost:6379"
-
-    # JWT
-    secret_key: str = "changeme_at_least_32_characters_long"
-    algorithm: str = "HS256"
-    access_token_expire_minutes: int = 30
-    refresh_token_expire_days: int = 7
-
-    # CORS
-    allowed_origins: str = "http://localhost:5173,http://localhost:3000"
-
-    # Anthropic
-    anthropic_api_key: str = ""
-
-    # Peter AI free usage limit
-    peter_free_limit: int = 3
-
-    model_config = SettingsConfigDict(
-        env_file=".env",
-        env_file_encoding="utf-8",
-        case_sensitive=False,
-        extra="ignore",
-    )
-
-    @property
-    def origins_list(self) -> list[str]:
-        return [o.strip() for o in self.allowed_origins.split(",")]
+class Base(DeclarativeBase):
+    pass
 
 
-@lru_cache
-def get_settings() -> Settings:
-    return Settings()
+async def get_db() -> AsyncGenerator[AsyncSession, None]:
+    async with AsyncSessionLocal() as session:
+        try:
+            yield session
+            await session.commit()
+        except Exception:
+            await session.rollback()
+            raise
+        finally:
+            await session.close()
+
+
+__all__ = ["engine", "Base", "AsyncSessionLocal", "get_db"]
