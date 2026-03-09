@@ -4,6 +4,7 @@
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
 body { background: #08080f; font-family: 'Courier New', monospace; }
+input, textarea, button { font-family: inherit; }
 input:focus, textarea:focus, button:focus { outline: none; }
 ::-webkit-scrollbar { width: 4px; }
 ::-webkit-scrollbar-track { background: #08080f; }
