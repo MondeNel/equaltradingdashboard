@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import { useState } from 'react'
 import { C, SYMBOLS } from '../constants'
 
 const dropStyle = (open) => ({
@@ -11,8 +11,8 @@ const dropStyle = (open) => ({
 })
 
 export default function SymbolSelector({ market, symbol, onMarketChange, onSymbolChange }) {
-  const [marketOpen, setMarketOpen] = React.useState(false)
-  const [symbolOpen, setSymbolOpen] = React.useState(false)
+  const [marketOpen, setMarketOpen] = useState(false)
+  const [symbolOpen, setSymbolOpen] = useState(false)
 
   const changeMarket = (m) => { onMarketChange(m); setMarketOpen(false); setSymbolOpen(false) }
   const changeSymbol = (s) => { onSymbolChange(s); setSymbolOpen(false) }
