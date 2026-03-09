@@ -13,7 +13,7 @@ api.interceptors.response.use(
   err => {
     if (err.response?.status === 401) {
       localStorage.removeItem('access_token')
-      window.location.href = '/login'
+      window.location.href = '/'
     }
     return Promise.reject(err)
   }
@@ -24,27 +24,32 @@ export const authAPI = {
   login:    (data) => api.post('/auth/login', data),
   me:       ()     => api.get('/auth/me'),
 }
+
 export const walletAPI = {
   get:          ()       => api.get('/wallet'),
   deposit:      (amount) => api.post('/wallet/deposit',  { amount }),
   withdraw:     (amount) => api.post('/wallet/withdraw', { amount }),
   transactions: ()       => api.get('/wallet/transactions'),
 }
+
 export const tradesAPI = {
-  open:     ()        => api.get('/trades/open'),
-  close:    (id)      => api.post(`/trades/${id}/close`),
-  closeAll: ()        => api.post('/trades/close-all'),
-  history:  ()        => api.get('/trades/history'),
+  open:     ()   => api.get('/trades/open'),
+  close:    (id) => api.post(`/trades/${id}/close`),
+  closeAll: ()   => api.post('/trades/close-all'),
+  history:  ()   => api.get('/trades/history'),
 }
+
 export const ordersAPI = {
   list:   ()     => api.get('/orders'),
   place:  (data) => api.post('/orders', data),
   cancel: (id)   => api.delete(`/orders/${id}`),
 }
+
 export const pricesAPI = {
   all: ()       => api.get('/prices'),
-  get: (symbol) => api.get(`/prices/${symbol}`),
+  get: (symbol) => api.get(`/prices/${encodeURIComponent(symbol)}`),
 }
+
 export const peterAPI = {
   analyse: (data) => api.post('/peter/analyse', data),
 }
