@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { SYMBOLS, LOT_SIZES, BASE_PRICES, USD_TO_ZAR, C } from "./constants";
-import { walletAPI, pricesAPI, ordersAPI } from "./services/api";
+import { walletAPI, pricesAPI, ordersAPI, tradesAPI } from "./services/api";
 import CandleChart from "./components/CandleChart";
 import PeterModal from "./components/PeterModal";
 import WalletModal from "./components/WalletModal";
@@ -35,6 +35,43 @@ export default function TradingDashboard() {
   }
 
   useEffect(() => { fetchWallet() }, [])
+
+  // ── Trades — fetch open trades from backend ────────────────────────────────
+  const fetchTrades = async () => {
+    try {
+      const res = await tradesAPI.open()
+      const trades = (res.data ?? []).map(t => ({
+        ...t,
+        type:       t.trade_type,
+        lot:        t.lot_size,
+        vol:        t.volume,
+        entryPrice: Number(t.entry_price),
+        tpPrice:    t.tp_price    ? Number(t.tp_price)  : null,
+        slPrice:    t.sl_price    ? Number(t.sl_price)  : null,
+        entryStr:   String(t.entry_price),
+        tpStr:      t.tp_price    ? String(t.tp_price)  : null,
+        slStr:      t.sl_price    ? String(t.sl_price)  : null,
+        pnl:        0,
+        pips:       0,
+        margin:     Number(t.margin ?? 0),
+        status:     'active',
+      }))
+      setOpenTrades(trades)
+    } catch (e) {
+      console.error('fetchTrades:', e)
+    }
+  }
+
+  // Poll: fast (2s) when pending orders exist, slow (8s) otherwise
+  useEffect(() => {
+    fetchTrades()
+    const interval = pendingOrders.length > 0 ? 2000 : 8000
+    const id = setInterval(() => {
+      fetchTrades()
+      fetchWallet()
+    }, interval)
+    return () => clearInterval(id)
+  }, [pendingOrders.length])
   const [openTrades, setOpenTrades] = useState([]);
   const peterApplyingRef = useRef(false);
   const livePriceRef     = useRef(BASE_PRICES["USD/ZAR"]);
@@ -171,23 +208,34 @@ export default function TradingDashboard() {
 
   const resetOrder = () => { setEntry(null); setTakeProfit(null); setStopLoss(null); setLotSize(null); setVolume(1); };
 
-  // Close one or all active trades — realise P&L back into balance
-  const handleCloseTrade = (idOrAll) => {
-    // Cancel pending orders too
-    setPendingOrders(prev => {
-      const toCancel = idOrAll==="all" ? prev : prev.filter(o=>o.id===idOrAll);
-      const margin   = toCancel.reduce((s,o)=>s+(o.margin||0),0);
-      if (margin>0) setBalance(b => b + margin);
-      return idOrAll==="all" ? [] : prev.filter(o=>o.id!==idOrAll);
-    });
-    // Close active trades
-    setOpenTrades(prev => {
-      const toClose  = idOrAll==="all" ? prev : prev.filter(t=>t.id===idOrAll);
-      const realised = toClose.reduce((s,t)=>s+t.pnl,0);
-      const margin   = toClose.reduce((s,t)=>s+(t.margin||0),0);
-      setBalance(b => b + margin + realised);
-      return idOrAll==="all" ? [] : prev.filter(t=>t.id!==idOrAll);
-    });
+  // Close one or all trades — hits backend then refreshes
+  const handleCloseTrade = async (idOrAll) => {
+    try {
+      if (idOrAll === "all") {
+        // Cancel all pending orders
+        for (const o of pendingOrders) {
+          await ordersAPI.cancel(o.id).catch(() => {})
+        }
+        setPendingOrders([])
+        await tradesAPI.closeAll()
+      } else {
+        // Check if it's a pending order or open trade
+        const isPending = pendingOrders.some(o => o.id === idOrAll)
+        if (isPending) {
+          await ordersAPI.cancel(idOrAll)
+          setPendingOrders(prev => prev.filter(o => o.id !== idOrAll))
+        } else {
+          await tradesAPI.close(idOrAll)
+        }
+      }
+      await fetchTrades()
+      await fetchWallet()
+    } catch (e) {
+      console.error('handleCloseTrade:', e)
+      // Still refresh to sync state
+      await fetchTrades()
+      await fetchWallet()
+    }
   };
 
   // Place a limit order — waits for market to reach entry price
