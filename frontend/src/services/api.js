@@ -20,8 +20,8 @@ api.interceptors.response.use(
 )
 
 export const authAPI = {
-  register: (data) => api.post('/auth/register', data),
-  login:    (data) => api.post('/auth/login', data),
+register: (data) => api.post('/auth/register', data),
+login:    (data) => api.post('/auth/login',    data),
   me:       ()     => api.get('/auth/me'),
 }
 
@@ -29,7 +29,7 @@ export const walletAPI = {
   get:          ()       => api.get('/wallet'),
   deposit:      (amount) => api.post('/wallet/deposit',  { amount }),
   withdraw:     (amount) => api.post('/wallet/withdraw', { amount }),
-  transactions: ()       => api.get('/wallet/transactions'),
+  transactions: ()       => api.get('/wallet/history'),
 }
 
 export const tradesAPI = {
@@ -40,9 +40,9 @@ export const tradesAPI = {
 }
 
 export const ordersAPI = {
-  list:   ()     => api.get('/orders'),
-  place:  (data) => api.post('/orders', data),
-  cancel: (id)   => api.delete(`/orders/${id}`),
+  list:   ()     => api.get('/orders/pending'),
+  place:  (data) => api.post('/orders/place', data),
+  cancel: (id)   => api.delete(`/orders/${id}/cancel`),
 }
 
 export const pricesAPI = {

@@ -23,7 +23,7 @@ export default function PositionsStrip({ trades, livePrices, onClose, onCloseAll
     </div>
   )
 
-  const totalPnl = trades.reduce((sum, t) => sum + calcPnl(t, livePrices), 0)
+  const totalPnl = openTrades.reduce((sum, t) => sum + (t.pnl ?? 0), 0)
 
   return (
     <div style={{ borderTop:`1px solid ${C.border}`, paddingBottom:4 }}>
