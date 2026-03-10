@@ -1,17 +1,12 @@
-import { useState, useEffect } from "react";
-import { walletAPI } from "../services/api";
+import { useState } from "react";
 
 export default function WalletModal({ balance, openTrades, onDeposit, onWithdraw, onClose, onCloseAll }) {
   const [tab,      setTab]      = useState("overview");
   const [amount,   setAmount]   = useState("");
   const [feedback, setFeedback] = useState(null);
-  const [txHistory, setTxHistory] = useState([]);
-
-  useEffect(() => {
-    walletAPI.transactions()
-      .then(res => setTxHistory(res.data ?? []))
-      .catch(() => {})
-  }, []);
+  const [txHistory,setTxHistory]= useState([
+    { id:1, type:"DEPOSIT", amount:5000, date:"2026-03-01", note:"Starter deposit" },
+  ]);
 
   const totalPnl   = openTrades.reduce((s,t)=>s+t.pnl,0);
   const currentBal = balance + totalPnl;
@@ -27,8 +22,8 @@ export default function WalletModal({ balance, openTrades, onDeposit, onWithdraw
     if (!n||n<=0)  { setFeedback({ok:false,msg:"Enter a valid amount"}); return; }
     if (n < 100)   { setFeedback({ok:false,msg:"Minimum deposit is ZAR 100"}); return; }
     onDeposit(n);
+    setTxHistory(h=>[{id:Date.now(),type:"DEPOSIT",amount:n,date:new Date().toISOString().slice(0,10),note:"Manual deposit"},...h]);
     setFeedback({ok:true,msg:`ZAR ${n.toLocaleString()} deposited!`});
-    walletAPI.transactions().then(res => setTxHistory(res.data ?? [])).catch(()=>{});
     setAmount("");
     setTimeout(()=>setFeedback(null),3000);
   };
@@ -40,8 +35,8 @@ export default function WalletModal({ balance, openTrades, onDeposit, onWithdraw
     if (n<100)             { setFeedback({ok:false,msg:"Minimum withdrawal is ZAR 100"}); return; }
     if (openTrades.length) { setFeedback({ok:false,msg:"Close open trades before withdrawing"}); return; }
     onWithdraw(n);
+    setTxHistory(h=>[{id:Date.now(),type:"WITHDRAW",amount:n,date:new Date().toISOString().slice(0,10),note:"Manual withdrawal"},...h]);
     setFeedback({ok:true,msg:`ZAR ${n.toLocaleString()} withdrawn!`});
-    walletAPI.transactions().then(res => setTxHistory(res.data ?? [])).catch(()=>{});
     setAmount("");
     setTimeout(()=>setFeedback(null),3000);
   };
@@ -306,3 +301,4 @@ export default function WalletModal({ balance, openTrades, onDeposit, onWithdraw
     </div>
   );
 }
+
