@@ -20,13 +20,15 @@ export default function TradingDashboard() {
   const [showPeter,  setShowPeter]  = useState(false);
   const [peterUsage, setPeterUsage] = useState(0);
   const [showWallet, setShowWallet] = useState(false);
-  const [balance,    setBalance]    = useState(0);
+  const [balance,         setBalance]         = useState(0);
+  const [availableBalance, setAvailableBalance] = useState(0);
 
   // ── Wallet — fetch real balance from backend ───────────────────────────────
   const fetchWallet = async () => {
     try {
       const res = await walletAPI.get()
-      setBalance(res.data.balance ?? 0)
+      setBalance(Number(res.data.balance ?? 0))
+      setAvailableBalance(Number(res.data.available_balance ?? 0))
     } catch (e) {
       console.error('fetchWallet:', e)
     }
@@ -121,7 +123,7 @@ export default function TradingDashboard() {
           if (tpHit || slHit) {
             const pip2   = t.tpPrice != null ? Math.abs(Math.round((t.tpPrice - t.entryPrice)/pip)) : Math.abs(Math.round((t.slPrice - t.entryPrice)/pip));
             const realPnl = tpHit ? Math.abs(pnl) : -Math.abs(pnl);
-            setBalance(b => b + t.margin + realPnl);
+            setBalance(b => b + (t.margin || 0) + realPnl);
             setResultToast({ id:Date.now(), hit:tpHit?"TP":"SL", pnl:realPnl, symbol:t.symbol, tradeType:t.type, pips:pip2 });
             setTimeout(()=>setResultToast(null), 5000);
           } else {
@@ -135,13 +137,15 @@ export default function TradingDashboard() {
   }, []);
 
   // Derived balances
-  const totalPnl       = openTrades.reduce((s,t)=>s+t.pnl,0);
-  const currentBalance = balance + totalPnl;
+  const totalPnl       = openTrades.reduce((s,t)=>s+(isNaN(t.pnl)?0:t.pnl),0);
+  const currentBalance = (isNaN(balance)?0:balance) + totalPnl;
 
   // Formatters
   const balFmt = v => {
-    const abs = Math.abs(v).toLocaleString("en-ZA",{minimumFractionDigits:2,maximumFractionDigits:2});
-    return (v<0?"−":"")+`ZAR ${abs}`;
+    const n = Number(v);
+    if (isNaN(n)) return "ZAR 0,00";
+    const abs = Math.abs(n).toLocaleString("en-ZA",{minimumFractionDigits:2,maximumFractionDigits:2});
+    return (n<0?"−":"")+`ZAR ${abs}`;
   };
   const zarFmt = v => v!=null ? `ZAR ${Math.abs(v).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g,",")}` : "ZAR 0,00";
   const priceFmt = v => {
@@ -172,7 +176,7 @@ export default function TradingDashboard() {
     // Cancel pending orders too
     setPendingOrders(prev => {
       const toCancel = idOrAll==="all" ? prev : prev.filter(o=>o.id===idOrAll);
-      const margin   = toCancel.reduce((s,o)=>s+o.margin,0);
+      const margin   = toCancel.reduce((s,o)=>s+(o.margin||0),0);
       if (margin>0) setBalance(b => b + margin);
       return idOrAll==="all" ? [] : prev.filter(o=>o.id!==idOrAll);
     });
@@ -180,7 +184,7 @@ export default function TradingDashboard() {
     setOpenTrades(prev => {
       const toClose  = idOrAll==="all" ? prev : prev.filter(t=>t.id===idOrAll);
       const realised = toClose.reduce((s,t)=>s+t.pnl,0);
-      const margin   = toClose.reduce((s,t)=>s+t.margin,0);
+      const margin   = toClose.reduce((s,t)=>s+(t.margin||0),0);
       setBalance(b => b + margin + realised);
       return idOrAll==="all" ? [] : prev.filter(t=>t.id!==idOrAll);
     });
@@ -191,7 +195,7 @@ export default function TradingDashboard() {
     if (type==="BUY"&&!canBuy)   return;
     if (type==="SELL"&&!canSell) return;
 
-    if (balance <= 0) {
+    if (availableBalance <= 0) {
       setToast({type:"NOFUNDS", id:Date.now()});
       setTimeout(()=>setToast(null),3000);
       return;
