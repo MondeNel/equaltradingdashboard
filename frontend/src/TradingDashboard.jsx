@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { SYMBOLS, LOT_SIZES, BASE_PRICES, USD_TO_ZAR, C } from "./constants";
+import { walletAPI } from "./services/api";
 import CandleChart from "./components/CandleChart";
 import PeterModal from "./components/PeterModal";
 import WalletModal from "./components/WalletModal";
@@ -20,6 +21,18 @@ export default function TradingDashboard() {
   const [peterUsage, setPeterUsage] = useState(0);
   const [showWallet, setShowWallet] = useState(false);
   const [balance,    setBalance]    = useState(0);
+
+  // ── Wallet — fetch real balance from backend ───────────────────────────────
+  const fetchWallet = async () => {
+    try {
+      const res = await walletAPI.get()
+      setBalance(res.data.balance ?? 0)
+    } catch (e) {
+      console.error('fetchWallet:', e)
+    }
+  }
+
+  useEffect(() => { fetchWallet() }, [])
   const [openTrades, setOpenTrades] = useState([]);
   const peterApplyingRef = useRef(false);
   const livePriceRef     = useRef(BASE_PRICES["USD/ZAR"]);
@@ -411,8 +424,8 @@ export default function TradingDashboard() {
         )}
         {showWallet && (
           <WalletModal balance={balance} openTrades={openTrades}
-            onDeposit={n=>setBalance(b=>b+n)}
-            onWithdraw={n=>setBalance(b=>b-n)}
+            onDeposit={async n => { await walletAPI.deposit(n); fetchWallet() }}
+            onWithdraw={async n => { await walletAPI.withdraw(n); fetchWallet() }}
             onCloseAll={handleCloseTrade}
             onClose={()=>setShowWallet(false)}/>
         )}
