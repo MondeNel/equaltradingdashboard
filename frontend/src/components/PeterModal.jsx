@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { C, FREE_LIMIT } from "../constants";
+import { peterAPI } from "../services/api";
 import SubscriptionModal from "./SubscriptionModal";
 
 export default function PeterModal({ onClose, onApply, livePrice, symbol, market, usageCount, onUseRequest }) {
@@ -43,13 +44,32 @@ Return ONLY raw JSON, no markdown:
 {"recommendedSymbol":"","recommendedMarket":"Crypto or Forex or Stocks","direction":"BUY or SELL","strategy":"one sentence","entry":0,"takeProfit":0,"stopLoss":0,"lotSize":"Macro or Mini or Standard","volume":1,"reasoning":"2-3 sentences"}`;
 
       try {
-        const res  = await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:800,messages:[{role:"user",content:prompt}]})});
-        const data = await res.json();
-        const raw  = data.content.map(b=>b.text||"").join("").replace(/```json|```/g,"").trim();
-        setAiResult(JSON.parse(raw));
+        const res  = await peterAPI.analyse({ symbol, market, live_price: livePrice, options: wants });
+        const data = res.data;
+        // Normalise snake_case → camelCase for display + handlePeterApply
+        if (data && !data.error) {
+          setAiResult({
+            recommendedSymbol: data.recommended_symbol,
+            recommendedMarket: data.recommended_market,
+            direction:         data.direction,
+            strategy:          data.strategy,
+            entry:             Number(data.entry),
+            takeProfit:        Number(data.take_profit),
+            stopLoss:          Number(data.stop_loss),
+            lotSize:           data.lot_size,
+            volume:            data.volume,
+            reasoning:         data.reasoning,
+            // keep snake_case too so handlePeterApply can find them
+            take_profit:       Number(data.take_profit),
+            stop_loss:         Number(data.stop_loss),
+          });
+        } else {
+          setAiResult({ error:true, reasoning: data?.detail || "Peter couldn't connect right now. Please try again." });
+        }
         setStep("results");
       } catch(e) {
-        setAiResult({ error:true, reasoning:"Peter couldn't connect right now. Please try again." });
+        const detail = e.response?.data?.detail || "Peter couldn't connect right now. Please try again.";
+        setAiResult({ error:true, reasoning: detail });
         setStep("results");
       }
     }

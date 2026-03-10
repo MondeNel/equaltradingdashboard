@@ -22,6 +22,8 @@ export default function TradingDashboard() {
   const [showWallet, setShowWallet] = useState(false);
   const [balance,         setBalance]         = useState(0);
   const [availableBalance, setAvailableBalance] = useState(0);
+  const [openTrades,      setOpenTrades]      = useState([]);
+  const [pendingOrders,   setPendingOrders]   = useState([]);
 
   // ── Wallet — fetch real balance from backend ───────────────────────────────
   const fetchWallet = async () => {
@@ -37,6 +39,30 @@ export default function TradingDashboard() {
   useEffect(() => { fetchWallet() }, [])
 
   // ── Trades — fetch open trades from backend ────────────────────────────────
+  const fetchPending = async () => {
+    try {
+      const res = await ordersAPI.list()
+      const orders = (res.data ?? []).map(o => ({
+        id:         o.id,
+        type:       o.order_type,
+        symbol:     o.symbol,
+        market:     o.market,
+        lot:        o.lot_size,
+        vol:        o.volume,
+        entryPrice: Number(o.entry_price),
+        tpPrice:    o.tp_price  ? Number(o.tp_price)  : null,
+        slPrice:    o.sl_price  ? Number(o.sl_price)  : null,
+        entryStr:   String(o.entry_price),
+        tpStr:      o.tp_price  ? String(o.tp_price)  : null,
+        slStr:      o.sl_price  ? String(o.sl_price)  : null,
+        margin:     Number(o.margin ?? 0),
+        pnl: 0, pips: 0, status: 'pending',
+      }))
+      setPendingOrders(orders)
+    } catch (e) {
+      console.error('fetchPending:', e)
+    }
+  }
   const fetchTrades = async () => {
     try {
       const res = await tradesAPI.open()
@@ -65,16 +91,20 @@ export default function TradingDashboard() {
   // Poll: fast (2s) when pending orders exist, slow (8s) otherwise
   useEffect(() => {
     fetchTrades()
+    fetchPending()
     const interval = pendingOrders.length > 0 ? 2000 : 8000
     const id = setInterval(() => {
       fetchTrades()
       fetchWallet()
+      fetchPending()
     }, interval)
     return () => clearInterval(id)
   }, [pendingOrders.length])
-  const [openTrades, setOpenTrades] = useState([]);
-  const peterApplyingRef = useRef(false);
-  const livePriceRef     = useRef(BASE_PRICES["USD/ZAR"]);
+  const peterApplyingRef    = useRef(false);
+  const livePriceRef        = useRef(BASE_PRICES["USD/ZAR"]);
+  const activatingOrdersRef = useRef(new Set());
+  const isPlacingRef        = useRef(false); // prevent double-tap order placement
+  const closingTradesRef    = useRef(new Set()); // prevent duplicate TP/SL processing
 
   // Keep ref in sync for use inside setInterval callbacks
   useEffect(() => { livePriceRef.current = livePrice; }, [livePrice]);
@@ -110,7 +140,7 @@ export default function TradingDashboard() {
   }, [symbol]);
 
   const [resultToast,  setResultToast]  = useState(null);
-  const [pendingOrders,setPendingOrders] = useState([]); // waiting for price to hit entry
+
 
   // Main price monitor — activates pending orders + updates P&L + auto-closes on TP/SL
   useEffect(() => {
@@ -124,12 +154,18 @@ export default function TradingDashboard() {
         for (const o of prev) {
           const entryHit =
             (o.type==="BUY"  && cur >= o.entryPrice) ||
-            (o.type==="SELL" && cur <= o.entryPrice) ||
-            Math.abs(cur - o.entryPrice) / o.entryPrice < 0.0003;
+            (o.type==="SELL" && cur <= o.entryPrice);
           if (entryHit) {
-            setOpenTrades(t => [...t, { ...o, status:"active", activatedAt: Date.now() }]);
-            setToast({ type:"ENTRY_HIT", id:Date.now(), symbol:o.symbol, tradeType:o.type, entryStr:o.entryStr, tpStr:o.tpStr||"–", slStr:o.slStr||"–", lot:o.lot, vol:o.vol });
-            setTimeout(()=>setToast(p=>p?.type==="ENTRY_HIT"?null:p), 4000);
+            if (!activatingOrdersRef.current.has(o.id)) {
+              activatingOrdersRef.current.add(o.id);
+              setToast({ type:"ENTRY_HIT", id:Date.now(), symbol:o.symbol, tradeType:o.type, entryStr:o.entryStr, tpStr:o.tpStr||"–", slStr:o.slStr||"–", lot:o.lot, vol:o.vol });
+              setTimeout(()=>setToast(p=>p?.type==="ENTRY_HIT"?null:p), 4000);
+              ordersAPI.activate(o.id, cur)
+                .then(() => { fetchTrades(); fetchWallet(); fetchPending(); })
+                .catch(() => { activatingOrdersRef.current.delete(o.id); })
+                .finally(() => { fetchTrades(); fetchWallet(); fetchPending(); });
+            }
+            // Always remove from local pending so interval doesn't re-trigger
           } else {
             stillPending.push(o);
           }
@@ -140,6 +176,8 @@ export default function TradingDashboard() {
       // ── Update P&L + auto-close on TP/SL ──
       setOpenTrades(prev => {
         const remaining = [];
+        const toClose = [];
+        
         for (const t of prev) {
           const pip    = cur < 10 ? 0.0001 : cur < 200 ? 0.0001 : 1;
           const diff   = t.type==="BUY" ? cur - t.entryPrice : t.entryPrice - cur;
@@ -158,19 +196,50 @@ export default function TradingDashboard() {
           );
 
           if (tpHit || slHit) {
+            // Skip if this trade is already being closed
+            if (closingTradesRef.current.has(t.id)) {
+              remaining.push(updated);
+              continue;
+            }
+            
             const pip2   = t.tpPrice != null ? Math.abs(Math.round((t.tpPrice - t.entryPrice)/pip)) : Math.abs(Math.round((t.slPrice - t.entryPrice)/pip));
             const realPnl = tpHit ? Math.abs(pnl) : -Math.abs(pnl);
-            setBalance(b => b + (t.margin || 0) + realPnl);
-            setResultToast({ id:Date.now(), hit:tpHit?"TP":"SL", pnl:realPnl, symbol:t.symbol, tradeType:t.type, pips:pip2 });
-            setTimeout(()=>setResultToast(null), 5000);
+            toClose.push({ trade: updated, realPnl, pip2, hit: tpHit ? "TP" : "SL" });
+            // Mark as being closed to prevent duplicate processing
+            closingTradesRef.current.add(t.id);
           } else {
             remaining.push(updated);
           }
         }
+        
+        // Process trades that hit TP/SL
+        toClose.forEach(({ trade, realPnl, pip2, hit }) => {
+          tradesAPI.close(trade.id)
+            .then(() => {
+              fetchTrades(); 
+              fetchWallet(); 
+              setResultToast({ id:Date.now(), hit, pnl:realPnl, symbol:trade.symbol, tradeType:trade.type, pips:pip2 });
+              setTimeout(()=>setResultToast(null), 5000);
+            })
+            .catch(err => {
+              console.error('Failed to close trade on TP/SL hit:', err);
+              // If backend fails, add the trade back to the list
+              setOpenTrades(current => [...current, trade]);
+            })
+            .finally(() => {
+              // Always remove from the closing set, regardless of success/failure
+              closingTradesRef.current.delete(trade.id);
+            });
+        });
+        
         return remaining;
       });
     }, 600);
-    return () => clearInterval(id);
+    return () => {
+      clearInterval(id);
+      // Clean up any pending close operations
+      closingTradesRef.current.clear();
+    };
   }, []);
 
   // Derived balances
@@ -230,16 +299,18 @@ export default function TradingDashboard() {
       }
       await fetchTrades()
       await fetchWallet()
+      await fetchPending()
     } catch (e) {
       console.error('handleCloseTrade:', e)
-      // Still refresh to sync state
       await fetchTrades()
       await fetchWallet()
+      await fetchPending()
     }
   };
 
   // Place a limit order — waits for market to reach entry price
   const handleTrade = async type => {
+    if (isPlacingRef.current) return;
     if (type==="BUY"&&!canBuy)   return;
     if (type==="SELL"&&!canSell) return;
 
@@ -261,6 +332,7 @@ export default function TradingDashboard() {
     const slP    = stopLoss;
 
     try {
+      isPlacingRef.current = true;
       const res = await ordersAPI.place({
         symbol,
         market,
@@ -288,8 +360,8 @@ export default function TradingDashboard() {
         pnl: 0, pips: 0, status: "pending",
       };
 
-      setPendingOrders(prev => prev.some(o => o.id === localOrder.id) ? prev : [...prev, localOrder]);
       fetchWallet();
+      fetchPending();
       setToast({ type:"PENDING", id, symbol, tradeType:type, entryStr:localOrder.entryStr, tpStr:localOrder.tpStr||"–", slStr:localOrder.slStr||"–", lot, vol });
       setTimeout(()=>setToast(p=>p?.id===id?null:p), 4000);
       resetOrder();
@@ -299,6 +371,8 @@ export default function TradingDashboard() {
       console.error("handleTrade:", msg);
       setToast({ type:"NOFUNDS", id:Date.now() });
       setTimeout(()=>setToast(null), 3000);
+    } finally {
+      isPlacingRef.current = false;
     }
   };
 

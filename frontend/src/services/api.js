@@ -35,9 +35,10 @@ export const walletAPI = {
 }
 
 export const ordersAPI = {
-  list:   ()     => api.get('/orders/pending'),
-  place:  (data) => api.post('/orders/place', data),
-  cancel: (id)   => api.delete(`/orders/${id}/cancel`),
+  list:     ()           => api.get('/orders/pending'),
+  place:    (data)       => api.post('/orders/place', data),
+  cancel:   (id)         => api.delete(`/orders/${id}/cancel`),
+  activate: (id, price)  => api.post(`/orders/${id}/activate?activation_price=${price}`),
 }
 
 export const tradesAPI = {
