@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { SYMBOLS, LOT_SIZES, BASE_PRICES, USD_TO_ZAR, C } from "./constants";
-import { walletAPI, pricesAPI } from "./services/api";
+import { walletAPI, pricesAPI, ordersAPI } from "./services/api";
 import CandleChart from "./components/CandleChart";
 import PeterModal from "./components/PeterModal";
 import WalletModal from "./components/WalletModal";
@@ -187,7 +187,7 @@ export default function TradingDashboard() {
   };
 
   // Place a limit order — waits for market to reach entry price
-  const handleTrade = type => {
+  const handleTrade = async type => {
     if (type==="BUY"&&!canBuy)   return;
     if (type==="SELL"&&!canSell) return;
 
@@ -197,38 +197,57 @@ export default function TradingDashboard() {
       return;
     }
 
-    const id     = Date.now();
-    const lot    = lotSize?.label ?? "Mini";
-    const vol    = volume;
-    const pipVal = LOT_SIZES.find(l=>l.label===lot)?.pip ?? 1;
-    const margin = Math.max(50, pipVal * vol * 20);
-    const cur    = livePriceRef.current;
-    // If no entry set, place entry slightly ahead of current price in trade direction
-    const dec    = cur > 10000 ? 2 : cur > 100 ? 2 : 4;
+    const lot  = lotSize?.label ?? "Mini";
+    const vol  = volume;
+    const cur  = livePriceRef.current;
+    const dec  = cur > 10000 ? 2 : cur > 100 ? 2 : 4;
     const defaultEntry = type==="BUY"
-      ? parseFloat((cur * 1.002).toFixed(dec))   // BUY stop: slightly above current
-      : parseFloat((cur * 0.998).toFixed(dec));   // SELL stop: slightly below current
+      ? parseFloat((cur * 1.002).toFixed(dec))
+      : parseFloat((cur * 0.998).toFixed(dec));
     const entryP = entry ?? defaultEntry;
     const tpP    = takeProfit;
     const slP    = stopLoss;
 
-    const order = {
-      id, type, symbol, lot, vol, margin,
-      entryPrice:    entryP,
-      placedAtPrice: cur,
-      entryStr:   priceFmt(entryP),
-      tpStr:      tpP!=null ? priceFmt(tpP) : null,
-      slStr:      slP!=null ? priceFmt(slP) : null,
-      tpPrice: tpP, slPrice: slP,
-      time: new Date().toLocaleTimeString("en-ZA",{hour:"2-digit",minute:"2-digit"}),
-      pnl: 0, pips: 0, status:"pending",
-    };
+    try {
+      const res = await ordersAPI.place({
+        symbol,
+        market,
+        order_type:  type,
+        lot_size:    lot,
+        volume:      vol,
+        entry_price: entryP,
+        tp_price:    tpP ?? undefined,
+        sl_price:    slP ?? undefined,
+      });
 
-    setPendingOrders(prev=>[...prev, order]);
-    setBalance(b => b - margin);
-    setToast({ type:"PENDING", id, symbol, tradeType:type, entryStr:order.entryStr, tpStr:order.tpStr||"–", slStr:order.slStr||"–", lot, vol });
-    setTimeout(()=>setToast(p=>p?.id===id?null:p), 4000);
-    resetOrder();
+      const backendOrder = res.data;
+      const id     = backendOrder.id;
+      const pipVal = LOT_SIZES.find(l=>l.label===lot)?.pip ?? 1;
+      const margin = Math.max(50, pipVal * vol * 20);
+
+      const localOrder = {
+        id, type, symbol, lot, vol, margin,
+        entryPrice: entryP,
+        entryStr:   priceFmt(entryP),
+        tpStr:      tpP != null ? priceFmt(tpP) : null,
+        slStr:      slP != null ? priceFmt(slP) : null,
+        tpPrice: tpP, slPrice: slP,
+        time: new Date().toLocaleTimeString("en-ZA",{hour:"2-digit",minute:"2-digit"}),
+        pnl: 0, pips: 0, status: "pending",
+      };
+
+      setPendingOrders(prev => prev.some(o => o.id === localOrder.id) ? prev : [...prev, localOrder]);
+      fetchWallet();
+      setToast({ type:"PENDING", id, symbol, tradeType:type, entryStr:localOrder.entryStr, tpStr:localOrder.tpStr||"–", slStr:localOrder.slStr||"–", lot, vol });
+      setTimeout(()=>setToast(p=>p?.id===id?null:p), 4000);
+      resetOrder();
+
+    } catch (err) {
+      const msg = err.response?.data?.detail || "Order failed";
+      console.error("handleTrade:", msg);
+      setToast({ type:"NOFUNDS", id:Date.now() });
+      setTimeout(()=>setToast(null), 3000);
+    }
   };
 
   const handlePeterApply = (rec) => {
