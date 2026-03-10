@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { SYMBOLS, LOT_SIZES, BASE_PRICES, USD_TO_ZAR, C } from "./constants";
-import { walletAPI } from "./services/api";
+import { walletAPI, pricesAPI } from "./services/api";
 import CandleChart from "./components/CandleChart";
 import PeterModal from "./components/PeterModal";
 import WalletModal from "./components/WalletModal";
@@ -41,7 +41,24 @@ export default function TradingDashboard() {
   useEffect(() => { livePriceRef.current = livePrice; }, [livePrice]);
 
   // Live price drift
-  useEffect(() => { setLivePrice(BASE_PRICES[symbol]); }, [symbol]);
+  // Seed live price from backend when symbol changes, fallback to BASE_PRICES
+  useEffect(() => {
+    setLivePrice(BASE_PRICES[symbol])
+    pricesAPI.get(symbol)
+      .then(res => {
+        const p = res.data?.price
+        // Backend returns real market price — only use if reasonably close to BASE_PRICES
+        // (within 20%) to avoid scale mismatches
+        if (p && p > 0) {
+          const base = BASE_PRICES[symbol]
+          const ratio = p / base
+          if (ratio > 0.8 && ratio < 1.2) {
+            setLivePrice(p)
+          }
+        }
+      })
+      .catch(() => {})
+  }, [symbol]);
   useEffect(() => {
     const id = setInterval(() => {
       setLivePrice(prev => {
@@ -495,7 +512,7 @@ export default function TradingDashboard() {
           {(openTrades.length > 0 || pendingOrders.length > 0) && (
             <div style={{background:"#06060f",borderBottom:`1px solid ${C.border}`,padding:"6px 16px",display:"flex",gap:8,overflowX:"auto"}}>
               {pendingOrders.map(o=>(
-                <div key={o.id} onClick={()=>setShowWallet(true)} style={{
+                <div key={`pending-${o.id}`} onClick={()=>setShowWallet(true)} style={{
                   flexShrink:0,display:"flex",alignItems:"center",gap:6,
                   background:"#0d0820",border:"1px solid #a78bfa44",
                   borderRadius:6,padding:"5px 10px",cursor:"pointer",
@@ -507,7 +524,7 @@ export default function TradingDashboard() {
                 </div>
               ))}
               {openTrades.map(t=>(
-                <div key={t.id} onClick={()=>setShowWallet(true)} style={{
+                <div key={`open-${t.id}`} onClick={()=>setShowWallet(true)} style={{
                   flexShrink:0,display:"flex",alignItems:"center",gap:6,
                   background:"#0a0a1e",border:`1px solid ${t.pnl>=0?"#22c55e33":"#ef444433"}`,
                   borderRadius:6,padding:"5px 10px",cursor:"pointer",
