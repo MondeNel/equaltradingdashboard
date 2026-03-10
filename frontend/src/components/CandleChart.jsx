@@ -1,429 +1,517 @@
-import { useState, useEffect, useRef } from 'react'
-import { BASE_PRICES } from '../constants'
-
-const HISTORY = 120
-const VIEW    = 40
-const W = 430, H = 320
-const PAD = { l:6, r:72, t:12, b:28 }
-const CW = W - PAD.l - PAD.r
-const CH = H - PAD.t - PAD.b
-const CHART_BG     = "#05050e"
-const CHART_BORDER = "#1e1e3a"
-const GRID_COL     = "#12122a"
-const AXIS_TEXT    = "#4a4a7a"
-const BULL_COL     = "#26a69a"
-const BEAR_COL     = "#ef5350"
+import { useState, useEffect, useRef } from "react";
+import { BASE_PRICES, HISTORY, VIEW, W, H, PAD, CW, CH, CHART_BG, CHART_BORDER, GRID_COL, AXIS_TEXT, BULL_COL, BEAR_COL, C } from "../constants";
 
 function seedCandles(sym) {
-  const out = []
-  let p = BASE_PRICES[sym] * 0.97
+  const out = [];
+  let p = BASE_PRICES[sym] * 0.97;
   for (let i = 0; i < HISTORY - 1; i++) {
-    const o = p, c = p + (Math.random() - 0.48) * p * 0.007
-    out.push({ open:o, close:c, high:Math.max(o,c)+Math.random()*p*0.003, low:Math.min(o,c)-Math.random()*p*0.003, done:true })
-    p = c
+    const o = p, c = p + (Math.random()-0.48)*p*0.007;
+    out.push({ open:o, close:c, high:Math.max(o,c)+Math.random()*p*0.003, low:Math.min(o,c)-Math.random()*p*0.003, done:true });
+    p = c;
   }
-  out.push({ open:p, close:p, high:p, low:p, done:false })
-  return out
+  out.push({ open:p, close:p, high:p, low:p, done:false });
+  return out;
 }
 
-export default function LiveChart({ symbol, livePrice, entry, takeProfit, stopLoss, onEntry, onTP, onSL, openTrades = [], pendingOrders = [] }) {
-  const svgRef      = useRef(null)
-  const interactRef = useRef(null)
-  const scaleRef    = useRef({ minP:0, maxP:1, range:1 })
-  const lpRef       = useRef(livePrice)
-  lpRef.current     = livePrice
-  const tickRef     = useRef(0)
-  const candlesRef  = useRef(null)
-  const pinchRef    = useRef(null)
+// ─── Chart dimensions ─────────────────────────────────────────────────────────
 
-  const [candles,   setCandles]   = useState(() => seedCandles(symbol))
-  const [panOffset, setPanOffset] = useState(0)
-  const [zoomView,  setZoomView]  = useState(VIEW)
-  const [vOffset,   setVOffset]   = useState(0)
-  const panRef  = useRef(0)
-  const zoomRef = useRef(VIEW)
-  const vOffRef = useRef(0)
-  panRef.current  = panOffset
-  zoomRef.current = zoomView
-  vOffRef.current = vOffset
-  candlesRef.current = candles
+export default function CandleChart({ symbol, livePrice, entry, takeProfit, stopLoss, onEntry, onTP, onSL, openTrades = [], pendingOrders = [] }) {
+  const svgRef      = useRef(null);
+  const interactRef = useRef(null);
+  const scaleRef    = useRef({ minP:0, maxP:1, range:1 });
+  const lpRef       = useRef(livePrice);
+  lpRef.current     = livePrice;
+  const tickRef     = useRef(0);
+  const candlesRef  = useRef(null);
+  const pinchRef    = useRef(null); // { startDist, startView }
 
-  const MIN_VIEW = 8
-  const MAX_VIEW = HISTORY
+  const [candles,   setCandles]   = useState(() => seedCandles(symbol));
+  const [panOffset, setPanOffset] = useState(0);
+  const [zoomView,  setZoomView]  = useState(VIEW);
+  const [vOffset,   setVOffset]   = useState(0);   // vertical scroll in price units — positive = shift view up
+  const panRef   = useRef(0);
+  const zoomRef  = useRef(VIEW);
+  const vOffRef  = useRef(0);
+  panRef.current  = panOffset;
+  zoomRef.current = zoomView;
+  vOffRef.current = vOffset;
 
-  const zoomIn  = () => setZoomView(v => Math.max(MIN_VIEW,  Math.round(v * 0.7)))
-  const zoomOut = () => setZoomView(v => Math.min(MAX_VIEW, Math.round(v * 1.4)))
+  candlesRef.current = candles;
 
-  // Reset candles on symbol change
-  useEffect(() => {
-    setCandles(seedCandles(symbol))
-    setPanOffset(0)
-    setVOffset(0)
-  }, [symbol])
+  const MIN_VIEW = 8;
+  const MAX_VIEW = HISTORY;
+
+  const zoomIn  = () => setZoomView(v => Math.max(MIN_VIEW, Math.round(v * 0.7)));
+  const zoomOut = () => setZoomView(v => Math.min(MAX_VIEW, Math.round(v * 1.4)));
 
   // Live tick
   useEffect(() => {
     const id = setInterval(() => {
-      tickRef.current++
+      tickRef.current++;
       setCandles(prev => {
-        const next = [...prev]
-        const last = { ...next[next.length - 1] }
-        last.close = lpRef.current
-        last.high  = Math.max(last.high, lpRef.current)
-        last.low   = Math.min(last.low,  lpRef.current)
-        next[next.length - 1] = last
+        const next = [...prev];
+        const last = { ...next[next.length-1] };
+        last.close = lpRef.current;
+        last.high  = Math.max(last.high, lpRef.current);
+        last.low   = Math.min(last.low,  lpRef.current);
+        next[next.length-1] = last;
         if (tickRef.current % 10 === 0) {
-          last.done = true
-          next.push({ open:lpRef.current, close:lpRef.current, high:lpRef.current, low:lpRef.current, done:false })
-          if (next.length > HISTORY) next.shift()
+          last.done = true;
+          next.push({ open:lpRef.current, close:lpRef.current, high:lpRef.current, low:lpRef.current, done:false });
+          if (next.length > HISTORY) next.shift();
         }
-        return next
-      })
-    }, 800)
-    return () => clearInterval(id)
-  }, [])
+        return next;
+      });
+    }, 800);
+    return () => clearInterval(id);
+  }, []);
 
   // Visible slice
-  const total   = candles.length
-  const offset  = Math.min(panOffset, Math.max(0, total - zoomView))
-  const start   = Math.max(0, total - zoomView - offset)
-  const visible = candles.slice(start, start + zoomView)
-  const isLive  = offset === 0
+  const total   = candles.length;
+  const offset  = Math.min(panOffset, Math.max(0, total - zoomView));
+  const start   = Math.max(0, total - zoomView - offset);
+  const visible = candles.slice(start, start + zoomView);
+  const isLive  = offset === 0;
 
-  // Scale
-  const allP    = visible.flatMap(c => [c.high, c.low])
-  const rawMin  = Math.min(...allP) * 0.9993
-  const rawMax  = Math.max(...allP) * 1.0007
-  const rawRange = rawMax - rawMin || 1
-  const minP    = rawMin - vOffset * rawRange
-  const maxP    = rawMax - vOffset * rawRange
-  const range   = maxP - minP || 1
-  scaleRef.current = { minP, maxP, range }
+  // Scale — apply vertical offset so user can scroll price axis up/down
+  const allP   = visible.flatMap(c => [c.high, c.low]);
+  const rawMin = Math.min(...allP) * 0.9993;
+  const rawMax = Math.max(...allP) * 1.0007;
+  const rawRange = rawMax - rawMin || 1;
+  const minP  = rawMin - vOffset * rawRange;
+  const maxP  = rawMax - vOffset * rawRange;
+  const range = maxP - minP || 1;
+  scaleRef.current = { minP, maxP, range };
 
-  const toY     = v => PAD.t + CH - ((v - minP) / range) * CH
-  const toX     = i => PAD.l + (i + 0.5) * (CW / zoomView)
-  const toPrice = y => { const { minP:mn, range:rng } = scaleRef.current; return mn + ((PAD.t + CH - y) / CH) * rng }
-  const cW      = Math.max(2, CW / zoomView - 1.5)
-  const slotPx  = CW / zoomView
+  // Chart helpers
+  const toY     = v => PAD.t + CH - ((v - minP) / range) * CH;
+  const toX     = i => PAD.l + (i + 0.5) * (CW / zoomView);
+  const toPrice = y => { const { minP:mn, range:rng } = scaleRef.current; return mn + ((PAD.t+CH-y)/CH)*rng; };
+  const cW      = Math.max(2, CW/zoomView - 1.5);
 
-  const lastClose = visible[visible.length - 1]?.close ?? livePrice
-  const lastY     = toY(lastClose)
+  // Mid-chart price (used for default line spawn position)
+  const midPrice = (minP + maxP) / 2;
 
-  const fmt = v => {
-    if (v == null) return ''
-    return livePrice > 10000
-      ? v.toLocaleString('en-ZA', { minimumFractionDigits:2 })
-      : livePrice > 100 ? v.toFixed(2) : v.toFixed(4)
-  }
-
+  // SVG event coords
   const svgXY = e => {
-    const r  = svgRef.current.getBoundingClientRect()
-    const cx = e.touches ? e.touches[0].clientX : e.clientX
-    const cy = e.touches ? e.touches[0].clientY : e.clientY
-    return { x:(cx - r.left) * (W / r.width), y:(cy - r.top) * (H / r.height) }
-  }
+    const r  = svgRef.current.getBoundingClientRect();
+    const cx = e.touches ? e.touches[0].clientX : e.clientX;
+    const cy = e.touches ? e.touches[0].clientY : e.clientY;
+    return { x:(cx-r.left)*(W/r.width), y:(cy-r.top)*(H/r.height) };
+  };
 
-  const hitLine = svgY => {
+  // Pixel width of one candle
+  const slotPx = CW / zoomView;
+
+  // Is point inside a line's hit zone?
+  const lineHitY = (val) => {
+    if (val == null) return null;
+    return toY(val);
+  };
+
+  const hitLine = (svgY) => {
     for (const { key, val } of [
       { key:"entry", val:entry },
       { key:"tp",    val:takeProfit },
       { key:"sl",    val:stopLoss },
     ]) {
-      if (val != null && Math.abs(toY(val) - svgY) < 16) return key
+      const ly = lineHitY(val);
+      if (ly !== null && Math.abs(svgY - ly) < 16) return key;
     }
-    return null
-  }
+    return null;
+  };
 
-  const onLineDown = (key, e) => {
-    e.stopPropagation(); e.preventDefault()
-    interactRef.current = { type:"line", key }
-  }
+  // Global pointer handlers
+  useEffect(() => {
+    const getDist = touches => {
+      const dx = touches[0].clientX - touches[1].clientX;
+      const dy = touches[0].clientY - touches[1].clientY;
+      return Math.sqrt(dx*dx + dy*dy);
+    };
 
+    const onMove = e => {
+      if (!svgRef.current) return;
+
+      // ── Pinch-to-zoom: continuous incremental delta ──
+      if (e.touches && e.touches.length === 2) {
+        e.preventDefault();
+        if (!pinchRef.current) return;
+        const newDist = getDist(e.touches);
+        const prevDist = pinchRef.current.lastDist;
+        const delta = prevDist - newDist;          // positive = fingers closing = zoom in
+        pinchRef.current.lastDist = newDist;
+
+        // Accumulate sub-candle changes with a float accumulator
+        pinchRef.current.acc = (pinchRef.current.acc || 0) + delta * 0.06;
+        const steps = Math.trunc(pinchRef.current.acc);
+        if (steps !== 0) {
+          pinchRef.current.acc -= steps;
+          setZoomView(v => Math.max(8, Math.min(HISTORY, v + steps)));
+        }
+        return;
+      }
+
+      if (!interactRef.current) return;
+      e.preventDefault();
+      const { x, y } = svgXY(e);
+      const ia = interactRef.current;
+
+      if (ia.type === "pan") {
+        // Horizontal → scroll candle history
+        const dx    = x - ia.startX;
+        const delta = -Math.round(dx / slotPx);
+        const max   = Math.max(0, candlesRef.current.length - zoomRef.current);
+        setPanOffset(Math.max(0, Math.min(ia.startOffset + delta, max)));
+        // Vertical → shift price view (drag up = see higher prices, drag down = lower)
+        const dy       = y - ia.startY;
+        const pxPerPct = CH;                          // full chart height = 100% of range
+        const shift    = (dy / pxPerPct);             // fraction of visible range
+        setVOffset(ia.startVOffset - shift);
+        return;
+      }
+
+      // line drag
+      const { minP:mn, maxP:mx } = scaleRef.current;
+      const lp  = lpRef.current;
+      const dec = lp > 10000 ? 2 : lp > 100 ? 2 : 4;
+      const val = parseFloat(Math.max(mn, Math.min(mx, toPrice(y))).toFixed(dec));
+      if (ia.key === "entry") onEntry(val);
+      if (ia.key === "tp")    onTP(val);
+      if (ia.key === "sl")    onSL(val);
+    };
+
+    const onUp = e => {
+      // Clear pinch only when both fingers lift
+      if (e && e.touches !== undefined && e.touches.length < 2) {
+        pinchRef.current = null;
+      }
+      if (!e || !e.touches || e.touches.length === 0) {
+        interactRef.current = null;
+      }
+    };
+
+    window.addEventListener("mousemove",  onMove);
+    window.addEventListener("mouseup",    onUp);
+    window.addEventListener("touchmove",  onMove, { passive:false });
+    window.addEventListener("touchend",   onUp);
+    window.addEventListener("touchcancel",onUp);
+    return () => {
+      window.removeEventListener("mousemove",  onMove);
+      window.removeEventListener("mouseup",    onUp);
+      window.removeEventListener("touchmove",  onMove);
+      window.removeEventListener("touchend",   onUp);
+      window.removeEventListener("touchcancel",onUp);
+    };
+  }, [onEntry, onTP, onSL, slotPx]);
+
+  // Pointer down on SVG — start pinch on two-finger touch, else pan/line
   const onBgDown = e => {
     if (e.touches && e.touches.length === 2) {
-      e.preventDefault()
+      e.preventDefault();
+      // Start fresh incremental pinch — record current dist, reset accumulator
       pinchRef.current = {
         lastDist: Math.sqrt(
           Math.pow(e.touches[0].clientX - e.touches[1].clientX, 2) +
           Math.pow(e.touches[0].clientY - e.touches[1].clientY, 2)
         ),
         acc: 0,
-      }
-      interactRef.current = null
-      return
+      };
+      interactRef.current = null;
+      return;
     }
-    if (interactRef.current) return
-    e.preventDefault()
-    const { x, y } = svgXY(e)
-    const hasActiveTrade = openTrades.some(t => t.symbol === symbol)
+    if (interactRef.current) return;
+    e.preventDefault();
+    const { x, y } = svgXY(e);
+    const hasActiveTrade = openTrades.some(t => t.symbol === symbol);
     if (!hasActiveTrade) {
-      const hit = hitLine(y)
-      if (hit) { interactRef.current = { type:"line", key:hit }; return }
+      const hit = hitLine(y);
+      if (hit) { interactRef.current = { type:"line", key:hit }; return; }
     }
-    interactRef.current = { type:"pan", startX:x, startY:y, startOffset:panRef.current, startVOffset:vOffRef.current }
-  }
+    interactRef.current = { type:"pan", startX:x, startY:y, startOffset:panRef.current, startVOffset:vOffRef.current };
+  };
 
-  useEffect(() => {
-    const getDist = touches => {
-      const dx = touches[0].clientX - touches[1].clientX
-      const dy = touches[0].clientY - touches[1].clientY
-      return Math.sqrt(dx * dx + dy * dy)
-    }
-    const onMove = e => {
-      if (!svgRef.current) return
-      if (e.touches && e.touches.length === 2) {
-        e.preventDefault()
-        if (!pinchRef.current) return
-        const newDist  = getDist(e.touches)
-        const delta    = pinchRef.current.lastDist - newDist
-        pinchRef.current.lastDist = newDist
-        pinchRef.current.acc = (pinchRef.current.acc || 0) + delta * 0.06
-        const steps = Math.trunc(pinchRef.current.acc)
-        if (steps !== 0) {
-          pinchRef.current.acc -= steps
-          setZoomView(v => Math.max(8, Math.min(HISTORY, v + steps)))
-        }
-        return
-      }
-      if (!interactRef.current) return
-      e.preventDefault()
-      const { x, y } = svgXY(e)
-      const ia = interactRef.current
-      if (ia.type === "pan") {
-        const dx    = x - ia.startX
-        const delta = -Math.round(dx / slotPx)
-        const max   = Math.max(0, candlesRef.current.length - zoomRef.current)
-        setPanOffset(Math.max(0, Math.min(ia.startOffset + delta, max)))
-        const dy    = y - ia.startY
-        setVOffset(ia.startVOffset - (dy / CH))
-        return
-      }
-      const { minP:mn, maxP:mx } = scaleRef.current
-      const lp  = lpRef.current
-      const dec = lp > 10000 ? 2 : lp > 100 ? 2 : 4
-      const val = parseFloat(Math.max(mn, Math.min(mx, toPrice(y))).toFixed(dec))
-      if (ia.key === "entry") onEntry(val)
-      if (ia.key === "tp")    onTP(val)
-      if (ia.key === "sl")    onSL(val)
-    }
-    const onUp = e => {
-      if (e && e.touches !== undefined && e.touches.length < 2) pinchRef.current = null
-      if (!e || !e.touches || e.touches.length === 0) interactRef.current = null
-    }
-    window.addEventListener("mousemove",   onMove)
-    window.addEventListener("mouseup",     onUp)
-    window.addEventListener("touchmove",   onMove, { passive:false })
-    window.addEventListener("touchend",    onUp)
-    window.addEventListener("touchcancel", onUp)
-    return () => {
-      window.removeEventListener("mousemove",   onMove)
-      window.removeEventListener("mouseup",     onUp)
-      window.removeEventListener("touchmove",   onMove)
-      window.removeEventListener("touchend",    onUp)
-      window.removeEventListener("touchcancel", onUp)
-    }
-  }, [onEntry, onTP, onSL, slotPx])
+  // Explicit line handle mousedown (prevents pan from firing)
+  const onLineDown = (key, e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    interactRef.current = { type:"line", key };
+  };
 
+  const fmt = v => {
+    if (v == null) return "";
+    const lp = lpRef.current;
+    return lp > 10000 ? v.toFixed(0) : lp > 100 ? v.toFixed(2) : v.toFixed(4);
+  };
+
+  const lastY = toY(livePrice);
   const lines = [
-    { key:"entry", val:entry,      color:"#38bdf8", label:"EN", dash:"none" },
-    { key:"tp",    val:takeProfit, color:"#4ade80", label:"TP", dash:"6,3"  },
-    { key:"sl",    val:stopLoss,   color:"#f87171", label:"SL", dash:"6,3"  },
-  ]
-  const hasActiveTrade = openTrades.some(t => t.symbol === symbol)
+    { key:"entry", val:entry,      color:C.entryCol, label:"ENTRY", dash:"none" },
+    { key:"tp",    val:takeProfit, color:C.tpCol,    label:"TP",    dash:"5,3"  },
+    { key:"sl",    val:stopLoss,   color:C.slCol,    label:"SL",    dash:"5,3"  },
+  ];
 
   return (
     <div style={{ position:"relative" }}>
-      {isLive && offset === 0 && panOffset === 0 ? null : (
-        <div style={{ position:"absolute", top:8, left:8, zIndex:5, background:"#0d0d1a99",
-          border:"1px solid #2a2a50", borderRadius:6, padding:"2px 10px",
-          fontSize:8, color:"#a78bfa", letterSpacing:1, pointerEvents:"none" }}>
+      {/* History badge */}
+      {!isLive && (
+        <div style={{ position:"absolute", top:14, left:"50%", transform:"translateX(-50%)",
+          background:"#1a1a30cc", border:"1px solid #3a3a60", borderRadius:10,
+          padding:"2px 10px", fontSize:8, color:C.symbolCol, letterSpacing:1,
+          zIndex:5, pointerEvents:"none" }}>
           ◀ HISTORY · DRAG TO SCROLL
         </div>
       )}
       {!isLive && (
         <button onClick={() => setPanOffset(0)} style={{
-          position:"absolute", bottom:14, right:106, zIndex:5,
-          background:"#1a1a30", border:"1px solid #a78bfa", borderRadius:8,
-          padding:"3px 8px", fontSize:8, color:"#a78bfa", letterSpacing:1,
-          cursor:"pointer", fontFamily:"inherit",
+          position:"absolute", bottom:14, right:106,
+          background:"#1a1a30", border:`1px solid ${C.symbolCol}`, borderRadius:8,
+          padding:"3px 8px", fontSize:8, color:C.symbolCol, letterSpacing:1,
+          cursor:"pointer", zIndex:5, fontFamily:"inherit",
         }}>LIVE ▶</button>
       )}
       {vOffset !== 0 && (
         <button onClick={() => setVOffset(0)} style={{
-          position:"absolute", top:14, right:8, zIndex:5,
+          position:"absolute", top:14, right:8,
           background:"#1a1a30", border:"1px solid #3a3a60", borderRadius:8,
           padding:"3px 8px", fontSize:8, color:"#7070a8", letterSpacing:1,
-          cursor:"pointer", fontFamily:"inherit",
+          cursor:"pointer", zIndex:5, fontFamily:"inherit",
         }}>⌖ CENTRE</button>
       )}
 
       {/* Zoom controls */}
       <div style={{ position:"absolute", bottom:10, right:8, zIndex:5, display:"flex", alignItems:"center", gap:3 }}>
-        <button onClick={zoomOut} style={{ width:22, height:22, borderRadius:4, cursor:"pointer", background:"#12122a", border:"1px solid #2e2e58", color:"#8888c0", fontSize:14, fontWeight:"bold", display:"flex", alignItems:"center", justifyContent:"center", fontFamily:"inherit" }}>−</button>
-        <div style={{ padding:"2px 6px", borderRadius:4, background:"#0a0a1e", border:"1px solid #1e1e3a", color:"#5858a0", fontSize:8, letterSpacing:1, minWidth:28, textAlign:"center" }}>{zoomView}c</div>
-        <button onClick={zoomIn}  style={{ width:22, height:22, borderRadius:4, cursor:"pointer", background:"#12122a", border:"1px solid #2e2e58", color:"#8888c0", fontSize:14, fontWeight:"bold", display:"flex", alignItems:"center", justifyContent:"center", fontFamily:"inherit" }}>+</button>
+        <button onClick={zoomOut} style={{
+          width:22, height:22, borderRadius:4, cursor:"pointer",
+          background:"#12122a", border:"1px solid #2e2e58",
+          color:"#8888c0", fontSize:14, fontWeight:"bold", lineHeight:1,
+          display:"flex", alignItems:"center", justifyContent:"center", fontFamily:"inherit",
+        }}>−</button>
+        <div style={{
+          padding:"2px 6px", borderRadius:4,
+          background:"#0a0a1e", border:"1px solid #1e1e3a",
+          color:"#5858a0", fontSize:8, letterSpacing:1, minWidth:28, textAlign:"center",
+        }}>{zoomView}c</div>
+        <button onClick={zoomIn} style={{
+          width:22, height:22, borderRadius:4, cursor:"pointer",
+          background:"#12122a", border:"1px solid #2e2e58",
+          color:"#8888c0", fontSize:14, fontWeight:"bold", lineHeight:1,
+          display:"flex", alignItems:"center", justifyContent:"center", fontFamily:"inherit",
+        }}>+</button>
       </div>
 
       <svg ref={svgRef} width="100%" viewBox={`0 0 ${W} ${H}`}
-        style={{ display:"block", userSelect:"none", touchAction:"none", cursor:"grab", borderRadius:"6px", border:`1px solid ${CHART_BORDER}` }}
+        style={{ display:"block", userSelect:"none", touchAction:"none",
+          cursor: interactRef.current?.type==="pan" ? "grabbing" : "grab",
+          borderRadius:"6px", border:`1px solid ${CHART_BORDER}` }}
         onMouseDown={onBgDown} onTouchStart={onBgDown}>
-        <defs><clipPath id="cc"><rect x={PAD.l} y={PAD.t} width={CW} height={CH} /></clipPath></defs>
-        <rect width={W} height={H} fill={CHART_BG} rx="5" />
+
+        <defs>
+          <clipPath id="cc"><rect x={PAD.l} y={PAD.t} width={CW} height={CH} /></clipPath>
+        </defs>
+
+        {/* Dark background */}
+        <rect x="0" y="0" width={W} height={H} fill={CHART_BG} rx="5" />
         <rect x={PAD.l} y={PAD.t} width={CW} height={CH} fill={CHART_BG} />
 
-        {/* Grid + price axis */}
+        {/* Horizontal grid lines with price labels */}
         {[0, 0.2, 0.4, 0.6, 0.8, 1].map((pct, i) => {
-          const yy = PAD.t + CH * pct
-          const price = maxP - pct * range
+          const yy    = PAD.t + CH * pct;
+          const price = maxP - pct * range;
           return (
             <g key={i}>
-              <line x1={PAD.l} y1={yy} x2={PAD.l + CW} y2={yy}
-                stroke={pct === 0 || pct === 1 ? CHART_BORDER : GRID_COL} strokeWidth="1" />
-              <text x={PAD.l + CW + 5} y={yy + 3.5} fill={AXIS_TEXT} fontSize="8"
+              <line x1={PAD.l} y1={yy} x2={PAD.l+CW} y2={yy}
+                stroke={pct===0||pct===1 ? CHART_BORDER : GRID_COL}
+                strokeWidth={pct===0||pct===1 ? "1" : "1"} />
+              <text x={PAD.l+CW+5} y={yy+3.5} fill={AXIS_TEXT} fontSize="8"
                 fontFamily="'Helvetica Neue',Arial,sans-serif">{fmt(price)}</text>
             </g>
-          )
+          );
         })}
 
         {/* Candles */}
         <g clipPath="url(#cc)">
           {visible.map((c, i) => {
-            const x   = toX(i)
-            const up  = c.close >= c.open
-            const col = up ? BULL_COL : BEAR_COL
-            const bT  = toY(Math.max(c.open, c.close))
-            const bH  = Math.max(1, Math.abs(toY(c.open) - toY(c.close)))
+            const x   = toX(i);
+            const up  = c.close >= c.open;
+            const col = up ? BULL_COL : BEAR_COL;
+            const bT  = toY(Math.max(c.open, c.close));
+            const bH  = Math.max(1, Math.abs(toY(c.open) - toY(c.close)));
             return (
               <g key={i}>
-                <line x1={x} y1={toY(c.high)} x2={x} y2={toY(c.low)} stroke={col} strokeWidth="1.2" />
-                <rect x={x - cW / 2} y={bT} width={cW} height={bH} fill={col} rx="0"
-                  style={!c.done ? { filter:`drop-shadow(0 0 2px ${col}88)` } : {}} />
+                {/* Wick */}
+                <line x1={x} y1={toY(c.high)} x2={x} y2={toY(c.low)}
+                  stroke={col} strokeWidth="1.2" />
+                {/* Body */}
+                <rect x={x-cW/2} y={bT} width={cW} height={bH}
+                  fill={col} rx="0"
+                  style={!c.done?{filter:`drop-shadow(0 0 2px ${col}88)`}:{}} />
               </g>
-            )
+            );
           })}
         </g>
 
-        <line x1={PAD.l + CW} y1={PAD.t} x2={PAD.l + CW} y2={PAD.t + CH} stroke={CHART_BORDER} strokeWidth="1" />
+        {/* Right-side price axis border */}
+        <line x1={PAD.l+CW} y1={PAD.t} x2={PAD.l+CW} y2={PAD.t+CH}
+          stroke={CHART_BORDER} strokeWidth="1" />
 
         {/* Live price line + tag */}
         {isLive && <>
-          <line x1={PAD.l} y1={lastY} x2={PAD.l + CW} y2={lastY}
-            stroke="#facc15" strokeWidth="1" strokeDasharray="4,3" opacity="0.7" />
-          <rect x={PAD.l + CW + 1} y={lastY - 9} width={68} height={18} fill="#facc15" rx="3" />
-          <text x={PAD.l + CW + 35} y={lastY + 4.5} fill="#000" fontSize="8.5"
-            fontFamily="'Courier New',monospace" textAnchor="middle" fontWeight="bold">{fmt(livePrice)}</text>
+          <line x1={PAD.l} y1={lastY} x2={PAD.l+CW} y2={lastY}
+            stroke={C.priceCol} strokeWidth="1" strokeDasharray="4,3" opacity="0.7" />
+          <rect x={PAD.l+CW+1} y={lastY-9} width={68} height={18} fill={C.priceCol} rx="3" />
+          <text x={PAD.l+CW+35} y={lastY+4.5} fill="#000" fontSize="8.5"
+            fontFamily="'Courier New',monospace" textAnchor="middle" fontWeight="bold">
+            {fmt(livePrice)}
+          </text>
         </>}
 
-        {/* Draggable level lines */}
-        {lines.map(({ key, val, color, label, dash }) => {
-          if (val == null) return null
-          const y = toY(val)
-          return (
-            <g key={key}>
-              {!hasActiveTrade && (
-                <rect x={PAD.l} y={y - 14} width={CW} height={28} fill="transparent"
-                  style={{ cursor:"ns-resize" }}
-                  onMouseDown={e => onLineDown(key, e)}
-                  onTouchStart={e => onLineDown(key, e)} />
-              )}
-              <line x1={PAD.l} y1={y} x2={PAD.l + CW} y2={y}
-                stroke={color} strokeWidth="1.5" strokeDasharray={dash} opacity="0.85" />
-              <rect x={PAD.l + 2} y={y - 7} width={28} height={14}
-                fill={color + (hasActiveTrade ? "18" : "30")} stroke={color} strokeWidth="1" rx="3"
-                style={!hasActiveTrade ? { cursor:"ns-resize" } : {}}
-                onMouseDown={!hasActiveTrade ? e => onLineDown(key, e) : undefined}
-                onTouchStart={!hasActiveTrade ? e => onLineDown(key, e) : undefined} />
-              <text x={PAD.l + 16} y={y + 4.5} fill={color} fontSize="7.5"
-                fontFamily="'Courier New',monospace" textAnchor="middle" fontWeight="bold">
-                {hasActiveTrade ? label : "⠿"}
-              </text>
-              <rect x={PAD.l + CW + 1} y={y - 9} width={68} height={18} fill={color} rx="3" />
-              <text x={PAD.l + CW + 35} y={y + 4.5} fill="#fff" fontSize="8"
-                fontFamily="'Courier New',monospace" textAnchor="middle" fontWeight="bold">
-                {label} {fmt(val)}
-              </text>
-            </g>
-          )
-        })}
+        {/* Level lines — draggable when no active trade, static when position is open */}
+        {(() => {
+          const hasActiveTrade = openTrades.some(t => t.symbol === symbol);
+          return lines.map(({ key, val, color, label, dash }) => {
+            if (val == null) return null;
+            const y = toY(val);
+            return (
+              <g key={key}>
+                {/* Hit zone — only when draggable */}
+                {!hasActiveTrade && (
+                  <rect x={PAD.l} y={y-14} width={CW} height={28} fill="transparent"
+                    style={{ cursor:"ns-resize" }}
+                    onMouseDown={e => onLineDown(key,e)}
+                    onTouchStart={e => onLineDown(key,e)} />
+                )}
+                {/* Line */}
+                <line x1={PAD.l} y1={y} x2={PAD.l+CW} y2={y}
+                  stroke={color} strokeWidth="1.5" strokeDasharray={dash} opacity="0.85" />
+                {/* Left grip — drag handle when active, plain label when locked */}
+                <rect x={PAD.l+2} y={y-7} width={28} height={14}
+                  fill={color+(hasActiveTrade?"18":"30")} stroke={color} strokeWidth="1" rx="3"
+                  style={!hasActiveTrade ? { cursor:"ns-resize" } : {}}
+                  onMouseDown={!hasActiveTrade ? e => onLineDown(key,e) : undefined}
+                  onTouchStart={!hasActiveTrade ? e => onLineDown(key,e) : undefined} />
+                <text x={PAD.l+16} y={y+4.5} fill={color} fontSize="7.5"
+                  fontFamily="'Courier New',monospace" textAnchor="middle" fontWeight="bold">
+                  {hasActiveTrade ? label : "⠿"}
+                </text>
+                {/* Right price tag */}
+                <rect x={PAD.l+CW+1} y={y-9} width={68} height={18} fill={color} rx="3" />
+                <text x={PAD.l+CW+35} y={y+4.5} fill="#fff" fontSize="8"
+                  fontFamily="'Courier New',monospace" textAnchor="middle" fontWeight="bold">
+                  {label} {fmt(val)}
+                </text>
+              </g>
+            );
+          });
+        })()}
 
-        {/* Pending order ghost lines */}
+        {/* Pending order ghost lines — dimmed, waiting for entry */}
         {pendingOrders.filter(o => o.symbol === symbol).map((o, idx) => {
-          const eY  = toY(o.entryPrice)
-          const tpY = o.tpPrice != null ? toY(o.tpPrice) : null
-          const slY = o.slPrice != null ? toY(o.slPrice) : null
-          const col = o.type === "BUY" ? "#4ade80" : "#f87171"
+          const eY  = toY(o.entryPrice);
+          const tpY = o.tpPrice != null ? toY(o.tpPrice) : null;
+          const slY = o.slPrice != null ? toY(o.slPrice) : null;
+          const col = o.type==="BUY" ? "#4ade80" : "#f87171";
           return (
             <g key={o.id} opacity="0.45">
-              {tpY != null && <>
-                <line x1={PAD.l} y1={tpY} x2={PAD.l + CW} y2={tpY} stroke="#4ade80" strokeWidth="1" strokeDasharray="4,4" />
-                <rect x={PAD.l + 2} y={tpY - 6} width={22} height={12} fill="#4ade8010" stroke="#4ade80" strokeWidth="0.8" rx="2"/>
-                <text x={PAD.l + 13} y={tpY + 3.5} fill="#4ade80" fontSize="6.5" fontFamily="'Courier New',monospace" textAnchor="middle">TP</text>
-              </>}
-              {slY != null && <>
-                <line x1={PAD.l} y1={slY} x2={PAD.l + CW} y2={slY} stroke="#f87171" strokeWidth="1" strokeDasharray="4,4" />
-                <rect x={PAD.l + 2} y={slY - 6} width={22} height={12} fill="#f8717110" stroke="#f87171" strokeWidth="0.8" rx="2"/>
-                <text x={PAD.l + 13} y={slY + 3.5} fill="#f87171" fontSize="6.5" fontFamily="'Courier New',monospace" textAnchor="middle">SL</text>
-              </>}
-              <line x1={PAD.l} y1={eY} x2={PAD.l + CW} y2={eY} stroke={col} strokeWidth="1.2" strokeDasharray="6,3" />
-              <rect x={PAD.l + 2} y={eY - 7} width={36} height={14} fill={col + "10"} stroke={col} strokeWidth="0.8" rx="3"/>
-              <text x={PAD.l + 20} y={eY + 4} fill={col} fontSize="6.5" fontFamily="'Courier New',monospace" textAnchor="middle">WAIT</text>
-              <rect x={PAD.l + CW + 1} y={eY - 9} width={68} height={18} fill={col + "50"} rx="3"/>
-              <text x={PAD.l + CW + 35} y={eY + 4.5} fill="#fff" fontSize="7.5" fontFamily="'Courier New',monospace" textAnchor="middle" fontWeight="bold">
+              {tpY != null && (
+                <>
+                  <line x1={PAD.l} y1={tpY} x2={PAD.l+CW} y2={tpY}
+                    stroke="#4ade80" strokeWidth="1" strokeDasharray="4,4" />
+                  <rect x={PAD.l+2} y={tpY-6} width={22} height={12} fill="#4ade8010" stroke="#4ade80" strokeWidth="0.8" rx="2"/>
+                  <text x={PAD.l+13} y={tpY+3.5} fill="#4ade80" fontSize="6.5" fontFamily="'Courier New',monospace" textAnchor="middle">TP</text>
+                </>
+              )}
+              {slY != null && (
+                <>
+                  <line x1={PAD.l} y1={slY} x2={PAD.l+CW} y2={slY}
+                    stroke="#f87171" strokeWidth="1" strokeDasharray="4,4" />
+                  <rect x={PAD.l+2} y={slY-6} width={22} height={12} fill="#f8717110" stroke="#f87171" strokeWidth="0.8" rx="2"/>
+                  <text x={PAD.l+13} y={slY+3.5} fill="#f87171" fontSize="6.5" fontFamily="'Courier New',monospace" textAnchor="middle">SL</text>
+                </>
+              )}
+              {/* Entry ghost line with pulsing label */}
+              <line x1={PAD.l} y1={eY} x2={PAD.l+CW} y2={eY}
+                stroke={col} strokeWidth="1.2" strokeDasharray="6,3" />
+              <rect x={PAD.l+2} y={eY-7} width={36} height={14} fill={col+"10"} stroke={col} strokeWidth="0.8" rx="3"/>
+              <text x={PAD.l+20} y={eY+4} fill={col} fontSize="6.5" fontFamily="'Courier New',monospace" textAnchor="middle">WAIT</text>
+              {/* Right tag */}
+              <rect x={PAD.l+CW+1} y={eY-9} width={68} height={18} fill={col+"50"} rx="3"/>
+              <text x={PAD.l+CW+35} y={eY+4.5} fill="#fff" fontSize="7.5"
+                fontFamily="'Courier New',monospace" textAnchor="middle" fontWeight="bold">
                 {o.type} {fmt(o.entryPrice)}
               </text>
             </g>
-          )
+          );
         })}
 
-        {/* Open position overlays */}
+        {/* Open position overlay — entry / TP / SL with live direction arrow */}
         {openTrades.filter(t => t.symbol === symbol).map((t, idx) => {
-          const entryY = toY(t.entry_price ?? t.entryPrice)
-          const curY   = toY(livePrice)
-          const tpY    = t.take_profit ?? t.tpPrice
-          const slY    = t.stop_loss  ?? t.slPrice
-          const tpYpx  = tpY != null ? toY(tpY) : null
-          const slYpx  = slY != null ? toY(slY) : null
-          const pnl    = t.pnl ?? 0
-          const isWin  = pnl >= 0
-          const pnlCol = isWin ? "#4ade80" : "#f87171"
-          const tagX   = PAD.l + 32 + idx * 2
+          const entryY = toY(t.entryPrice);
+          const curY   = toY(livePrice);
+          const tpY    = t.tpPrice != null ? toY(t.tpPrice) : null;
+          const slY    = t.slPrice != null ? toY(t.slPrice) : null;
+          const isWin  = t.pnl >= 0;
+          const pnlCol = isWin ? "#4ade80" : "#f87171";
+          const tagX   = PAD.l + 32 + idx * 2; // slight horizontal offset per trade
+
           return (
             <g key={t.id} opacity="0.92">
-              {tpYpx != null && <>
-                <line x1={PAD.l} y1={tpYpx} x2={PAD.l + CW} y2={tpYpx} stroke="#4ade80" strokeWidth="1.2" strokeDasharray="6,3" />
-                <rect x={PAD.l + 2} y={tpYpx - 7} width={22} height={13} fill="#4ade8018" stroke="#4ade80" strokeWidth="1" rx="3"/>
-                <text x={PAD.l + 13} y={tpYpx + 4} fill="#4ade80" fontSize="7" fontFamily="'Courier New',monospace" textAnchor="middle" fontWeight="bold">TP</text>
-              </>}
-              {slYpx != null && <>
-                <line x1={PAD.l} y1={slYpx} x2={PAD.l + CW} y2={slYpx} stroke="#f87171" strokeWidth="1.2" strokeDasharray="6,3" />
-                <rect x={PAD.l + 2} y={slYpx - 7} width={22} height={13} fill="#f8717118" stroke="#f87171" strokeWidth="1" rx="3"/>
-                <text x={PAD.l + 13} y={slYpx + 4} fill="#f87171" fontSize="7" fontFamily="'Courier New',monospace" textAnchor="middle" fontWeight="bold">SL</text>
-              </>}
-              {entryY !== curY && (
-                <rect x={PAD.l} y={Math.min(entryY, curY)} width={CW} height={Math.abs(entryY - curY)} fill={pnlCol} opacity="0.04" />
+              {/* TP line */}
+              {tpY != null && (
+                <>
+                  <line x1={PAD.l} y1={tpY} x2={PAD.l+CW} y2={tpY}
+                    stroke="#4ade80" strokeWidth="1.2" strokeDasharray="6,3" />
+                  <rect x={PAD.l+2} y={tpY-7} width={22} height={13} fill="#4ade8018" stroke="#4ade80" strokeWidth="1" rx="3"/>
+                  <text x={PAD.l+13} y={tpY+4} fill="#4ade80" fontSize="7" fontFamily="'Courier New',monospace" textAnchor="middle" fontWeight="bold">TP</text>
+                </>
               )}
-              <line x1={PAD.l} y1={entryY} x2={PAD.l + CW} y2={entryY} stroke="#38bdf8" strokeWidth="1.5" />
-              <rect x={PAD.l + 2} y={entryY - 7} width={28} height={13} fill="#38bdf818" stroke="#38bdf8" strokeWidth="1" rx="3"/>
-              <text x={PAD.l + 16} y={entryY + 4} fill="#38bdf8" fontSize="7" fontFamily="'Courier New',monospace" textAnchor="middle" fontWeight="bold">IN</text>
+              {/* SL line */}
+              {slY != null && (
+                <>
+                  <line x1={PAD.l} y1={slY} x2={PAD.l+CW} y2={slY}
+                    stroke="#f87171" strokeWidth="1.2" strokeDasharray="6,3" />
+                  <rect x={PAD.l+2} y={slY-7} width={22} height={13} fill="#f8717118" stroke="#f87171" strokeWidth="1" rx="3"/>
+                  <text x={PAD.l+13} y={slY+4} fill="#f87171" fontSize="7" fontFamily="'Courier New',monospace" textAnchor="middle" fontWeight="bold">SL</text>
+                </>
+              )}
+              {/* Shaded region between entry and live price (shows how far it's moved) */}
+              {entryY !== curY && (
+                <rect
+                  x={PAD.l} y={Math.min(entryY, curY)}
+                  width={CW} height={Math.abs(entryY - curY)}
+                  fill={pnlCol} opacity="0.04" />
+              )}
+              {/* Entry line */}
+              <line x1={PAD.l} y1={entryY} x2={PAD.l+CW} y2={entryY}
+                stroke="#38bdf8" strokeWidth="1.5" />
+              <rect x={PAD.l+2} y={entryY-7} width={28} height={13} fill="#38bdf818" stroke="#38bdf8" strokeWidth="1" rx="3"/>
+              <text x={PAD.l+16} y={entryY+4} fill="#38bdf8" fontSize="7" fontFamily="'Courier New',monospace" textAnchor="middle" fontWeight="bold">IN</text>
+
+              {/* Live price arrow pointing toward TP or SL */}
               {(() => {
-                const arrowY = Math.max(PAD.t + 10, Math.min(PAD.t + CH - 10, curY))
-                const col    = isWin ? "#4ade80" : "#f87171"
+                const arrowY  = Math.max(PAD.t+10, Math.min(PAD.t+CH-10, curY));
+                const goingUp = t.type==="BUY" ? livePrice > t.entryPrice : livePrice < t.entryPrice;
+                const arrow   = goingUp ? "▲" : "▼";
+                const col     = isWin ? "#4ade80" : "#f87171";
                 return (
                   <g>
-                    <line x1={tagX} y1={entryY} x2={tagX} y2={arrowY} stroke={col} strokeWidth="1" strokeDasharray="2,2" opacity="0.6"/>
+                    {/* Connector from entry to live price */}
+                    <line x1={tagX} y1={entryY} x2={tagX} y2={arrowY}
+                      stroke={col} strokeWidth="1" strokeDasharray="2,2" opacity="0.6"/>
+                    {/* Live dot */}
                     <circle cx={tagX} cy={arrowY} r="4" fill={col} opacity="0.9" />
-                    <rect x={PAD.l + CW + 1} y={arrowY - 9} width={68} height={18} fill={col + "cc"} rx="3"/>
-                    <text x={PAD.l + CW + 35} y={arrowY + 4.5} fill="#000" fontSize="7.5"
+                    {/* P&L tag right side */}
+                    <rect x={PAD.l+CW+1} y={arrowY-9} width={68} height={18} fill={col+"cc"} rx="3"/>
+                    <text x={PAD.l+CW+35} y={arrowY+4.5} fill="#000" fontSize="7.5"
                       fontFamily="'Courier New',monospace" textAnchor="middle" fontWeight="bold">
-                      {pnl >= 0 ? "▲ +" : "▼ "}{pnl.toFixed(2)}
+                      {arrow} {t.pnl>=0?"+":""}{t.pnl.toFixed(2)}
                     </text>
                   </g>
-                )
+                );
               })()}
             </g>
-          )
+          );
         })}
       </svg>
     </div>
-  )
+  );
 }
