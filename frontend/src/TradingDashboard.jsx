@@ -3,6 +3,7 @@ import { SYMBOLS, LOT_SIZES, BASE_PRICES, USD_TO_ZAR, C } from "./constants";
 import CandleChart from "./components/CandleChart";
 import PeterModal from "./components/PeterModal";
 import WalletModal from "./components/WalletModal";
+import { walletAPI, ordersAPI, tradesAPI, pricesAPI, peterAPI } from './services/api'
 
 export default function TradingDashboard() {
   const [market,     setMarket]     = useState("Forex");
@@ -26,6 +27,10 @@ export default function TradingDashboard() {
 
   // Keep ref in sync for use inside setInterval callbacks
   useEffect(() => { livePriceRef.current = livePrice; }, [livePrice]);
+
+useEffect(() => {
+  walletAPI.get().then(r => setBalance(parseFloat(r.data.available_balance ?? 0))).catch(()=>{});
+}, []);
 
   // Live price drift
   useEffect(() => { setLivePrice(BASE_PRICES[symbol]); }, [symbol]);
@@ -55,8 +60,7 @@ export default function TradingDashboard() {
         for (const o of prev) {
           const entryHit =
             (o.type==="BUY"  && cur >= o.entryPrice) ||
-            (o.type==="SELL" && cur <= o.entryPrice) ||
-            Math.abs(cur - o.entryPrice) / o.entryPrice < 0.0003;
+            (o.type==="SELL" && cur <= o.entryPrice);
           if (entryHit) {
             setOpenTrades(t => [...t, { ...o, status:"active", activatedAt: Date.now() }]);
             setToast({ type:"ENTRY_HIT", id:Date.now(), symbol:o.symbol, tradeType:o.type, entryStr:o.entryStr, tpStr:o.tpStr||"–", slStr:o.slStr||"–", lot:o.lot, vol:o.vol });
@@ -411,8 +415,8 @@ export default function TradingDashboard() {
         )}
         {showWallet && (
           <WalletModal balance={balance} openTrades={openTrades}
-            onDeposit={n=>setBalance(b=>b+n)}
-            onWithdraw={n=>setBalance(b=>b-n)}
+            onDeposit={async n => { await walletAPI.deposit(n); const r = await walletAPI.get(); setBalance(parseFloat(r.data.available_balance)); }}
+            onWithdraw={async n => { await walletAPI.withdraw(n); const r = await walletAPI.get(); setBalance(parseFloat(r.data.available_balance)); }}
             onCloseAll={handleCloseTrade}
             onClose={()=>setShowWallet(false)}/>
         )}

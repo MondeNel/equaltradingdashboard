@@ -1,47 +1,65 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { walletAPI } from "../services/api";
 
 export default function WalletModal({ balance, openTrades, onDeposit, onWithdraw, onClose, onCloseAll }) {
   const [tab,      setTab]      = useState("overview");
   const [amount,   setAmount]   = useState("");
   const [feedback, setFeedback] = useState(null);
-  const [txHistory,setTxHistory]= useState([
-    { id:1, type:"DEPOSIT", amount:5000, date:"2026-03-01", note:"Starter deposit" },
-  ]);
+  const [txHistory,setTxHistory]= useState([]);
+
+  // Load real transaction history from backend on open
+  useEffect(() => {
+    walletAPI.transactions().then(res => {
+      const txs = res.data ?? [];
+      setTxHistory(txs.map(t => ({
+        id:     t.id,
+        type:   t.transaction_type === "deposit" ? "DEPOSIT" : "WITHDRAW",
+        amount: parseFloat(t.amount),
+        date:   t.created_at?.slice(0, 10) ?? "",
+        note:   t.transaction_type === "deposit" ? "Manual deposit" : "Manual withdrawal",
+      })));
+    }).catch(() => {});
+  }, []);
 
   const totalPnl   = openTrades.reduce((s,t)=>s+t.pnl,0);
   const currentBal = balance + totalPnl;
-  const QUICK = [500,1000,2500,5000,10000];
 
   const fmt = v => {
     const abs = Math.abs(v).toLocaleString("en-ZA",{minimumFractionDigits:2,maximumFractionDigits:2});
     return (v<0?"−":"")+`ZAR ${abs}`;
   };
 
-  const doDeposit = () => {
+  const doDeposit = async () => {
     const n = parseFloat(amount);
     if (!n||n<=0)  { setFeedback({ok:false,msg:"Enter a valid amount"}); return; }
     if (n < 100)   { setFeedback({ok:false,msg:"Minimum deposit is ZAR 100"}); return; }
-    onDeposit(n);
-    setTxHistory(h=>[{id:Date.now(),type:"DEPOSIT",amount:n,date:new Date().toISOString().slice(0,10),note:"Manual deposit"},...h]);
-    setFeedback({ok:true,msg:`ZAR ${n.toLocaleString()} deposited!`});
-    setAmount("");
-    setTimeout(()=>setFeedback(null),3000);
+    try {
+      await onDeposit(n);
+      setTxHistory(h=>[{id:Date.now(),type:"DEPOSIT",amount:n,date:new Date().toISOString().slice(0,10),note:"Manual deposit"},...h]);
+      setFeedback({ok:true,msg:`ZAR ${n.toLocaleString()} deposited!`});
+      setAmount("");
+      setTimeout(()=>setFeedback(null),3000);
+    } catch {
+      setFeedback({ok:false,msg:"Deposit failed. Try again."});
+    }
   };
 
-  const doWithdraw = () => {
+  const doWithdraw = async () => {
     const n = parseFloat(amount);
     if (!n||n<=0)          { setFeedback({ok:false,msg:"Enter a valid amount"}); return; }
     if (n>balance)         { setFeedback({ok:false,msg:"Insufficient available balance"}); return; }
     if (n<100)             { setFeedback({ok:false,msg:"Minimum withdrawal is ZAR 100"}); return; }
     if (openTrades.length) { setFeedback({ok:false,msg:"Close open trades before withdrawing"}); return; }
-    onWithdraw(n);
-    setTxHistory(h=>[{id:Date.now(),type:"WITHDRAW",amount:n,date:new Date().toISOString().slice(0,10),note:"Manual withdrawal"},...h]);
-    setFeedback({ok:true,msg:`ZAR ${n.toLocaleString()} withdrawn!`});
-    setAmount("");
-    setTimeout(()=>setFeedback(null),3000);
+    try {
+      await onWithdraw(n);
+      setTxHistory(h=>[{id:Date.now(),type:"WITHDRAW",amount:n,date:new Date().toISOString().slice(0,10),note:"Manual withdrawal"},...h]);
+      setFeedback({ok:true,msg:`ZAR ${n.toLocaleString()} withdrawn!`});
+      setAmount("");
+      setTimeout(()=>setFeedback(null),3000);
+    } catch {
+      setFeedback({ok:false,msg:"Withdrawal failed. Try again."});
+    }
   };
-
-  const AmtInput = null; // replaced inline below
 
   const TabBtn = ({id,icon,label}) => (
     <button onClick={()=>{setTab(id);setFeedback(null);setAmount("");}} style={{
@@ -301,4 +319,3 @@ export default function WalletModal({ balance, openTrades, onDeposit, onWithdraw
     </div>
   );
 }
-
