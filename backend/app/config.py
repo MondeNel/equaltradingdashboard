@@ -18,8 +18,8 @@ class Settings(BaseSettings):
     # CORS
     allowed_origins: str = "http://localhost:5173,http://localhost:3000"
 
-    # Anthropic
-    anthropic_api_key: str = ""
+    # Groq AI
+    groq_api_key: str = ""
 
     # Peter AI free usage limit
     peter_free_limit: int = 3

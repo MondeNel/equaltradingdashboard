@@ -44,7 +44,7 @@ app.include_router(wallet_router)
 app.include_router(orders_router)
 app.include_router(trades_router)
 app.include_router(prices_router)
-app.include_router(peter_router)
+app.include_router(peter_router, prefix="/api")
 app.include_router(subscriptions_router)
 
 
