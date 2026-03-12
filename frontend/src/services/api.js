@@ -57,4 +57,10 @@ export const peterAPI = {
   analyse: (data) => api.post('/peter/analyse', data),
 }
 
+export const subscriptionAPI = {
+  plans:   ()       => api.get('/subscriptions/plans'),
+  me:      ()       => api.get('/subscriptions/me'),
+  upgrade: (plan)   => api.post('/subscriptions/upgrade', { plan }),
+}
+
 export default api

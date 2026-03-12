@@ -3,9 +3,9 @@ import { C, FREE_LIMIT } from "../constants";
 import { peterAPI } from "../services/api";
 import SubscriptionModal from "./SubscriptionModal";
 
-export default function PeterModal({ onClose, onApply, livePrice, symbol, market, usageCount, onUseRequest }) {
-  const remaining = Math.max(0, FREE_LIMIT - usageCount);
-  const [step,    setStep]    = useState(usageCount >= FREE_LIMIT ? "limit" : "intro");
+export default function PeterModal({ onClose, onApply, livePrice, symbol, market, usageCount, onUseRequest, isSubscribed, onSubscribed }) {
+  const remaining = isSubscribed ? 999 : Math.max(0, FREE_LIMIT - usageCount);
+  const [step,    setStep]    = useState((isSubscribed || usageCount < FREE_LIMIT) ? "intro" : "limit");
   const [answers, setAnswers] = useState({ volatile:false, topForex:false, surpriseMe:false });
   const [aiResult,setAiResult]= useState(null);
   const [typed,   setTyped]   = useState("");
@@ -112,7 +112,7 @@ Return ONLY raw JSON, no markdown:
 
   return (
     <div style={overlay} onClick={e=>{if(e.target===e.currentTarget)onClose();}}>
-      {showSub && <SubscriptionModal onClose={()=>setShowSub(false)} />}
+      {showSub && <SubscriptionModal onClose={()=>setShowSub(false)} onSubscribed={(data) => { setShowSub(false); if (onSubscribed) onSubscribed(data); }} />}
       <style>{`
         @keyframes peterIn{from{opacity:0;transform:translateY(20px) scale(0.97)}to{opacity:1;transform:translateY(0) scale(1)}}
         @keyframes spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}

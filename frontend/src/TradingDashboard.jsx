@@ -1,9 +1,9 @@
 import { useState, useEffect, useRef } from "react";
 import { SYMBOLS, LOT_SIZES, BASE_PRICES, USD_TO_ZAR, C } from "./constants";
+import { walletAPI, pricesAPI, ordersAPI, tradesAPI, subscriptionAPI } from "./services/api";
 import CandleChart from "./components/CandleChart";
 import PeterModal from "./components/PeterModal";
 import WalletModal from "./components/WalletModal";
-import { walletAPI, ordersAPI, tradesAPI, pricesAPI, peterAPI } from './services/api'
 
 export default function TradingDashboard() {
   const [market,     setMarket]     = useState("Forex");
@@ -19,21 +19,135 @@ export default function TradingDashboard() {
   const [toast,      setToast]      = useState(null);
   const [showPeter,  setShowPeter]  = useState(false);
   const [peterUsage, setPeterUsage] = useState(0);
-  const [showWallet, setShowWallet] = useState(false);
-  const [balance,    setBalance]    = useState(0);
-  const [openTrades, setOpenTrades] = useState([]);
-  const peterApplyingRef = useRef(false);
-  const livePriceRef     = useRef(BASE_PRICES["USD/ZAR"]);
+  const [isSubscribed, setIsSubscribed] = useState(false);
 
-  // Keep ref in sync for use inside setInterval callbacks
+  // ── Subscription — fetch status on mount ───────────────────────────────────
+  const fetchSubscription = async () => {
+    try {
+      const res = await subscriptionAPI.me();
+      setIsSubscribed(res.data.can_use_peter === true && res.data.plan !== "FREE");
+    } catch (e) {
+      setIsSubscribed(false);
+    }
+  };
+
+  useEffect(() => { fetchSubscription(); }, []);
+  const [showWallet, setShowWallet] = useState(false);
+  const [balance,         setBalance]         = useState(0);
+  const [availableBalance, setAvailableBalance] = useState(0);
+  const [openTrades,      setOpenTrades]      = useState([]);
+  const [pendingOrders,   setPendingOrders]   = useState([]);
+
+  // ── Wallet — fetch real balance from backend ───────────────────────────────
+  const fetchWallet = async () => {
+    try {
+      const res = await walletAPI.get()
+      setBalance(Number(res.data.balance ?? 0))
+      setAvailableBalance(Number(res.data.available_balance ?? 0))
+    } catch (e) {
+      console.error('fetchWallet:', e)
+    }
+  }
+
+  useEffect(() => { fetchWallet() }, [])
+
+  // ── Trades — fetch open trades from backend ────────────────────────────────
+  const fetchPending = async () => {
+    try {
+      const res = await ordersAPI.list()
+      const orders = (res.data ?? [])
+        .filter(o => !activatingOrdersRef.current.has(o.id)) // Skip orders being activated
+        .filter(o => !recentOrderIdsRef.current.has(o.id))     // Skip recently placed orders
+        .map(o => ({
+          id:         o.id,
+          type:       o.order_type,
+          symbol:     o.symbol,
+          market:     o.market,
+          lot:        o.lot_size,
+          vol:        o.volume,
+          entryPrice: Number(o.entry_price),
+          tpPrice:    o.tp_price  ? Number(o.tp_price)  : null,
+          slPrice:    o.sl_price  ? Number(o.sl_price)  : null,
+          entryStr:   String(o.entry_price),
+          tpStr:      o.tp_price  ? String(o.tp_price)  : null,
+          slStr:      o.sl_price  ? String(o.sl_price)  : null,
+          margin:     Number(o.margin ?? 0),
+          pnl: 0, pips: 0, status: 'pending',
+        }))
+      
+      // Debug: Log order count changes
+      if (orders.length !== pendingOrders.length) {
+        console.log(`Pending orders changed: ${pendingOrders.length} -> ${orders.length}`, orders.map(o => o.id))
+      }
+      
+      setPendingOrders(orders)
+    } catch (e) {
+      console.error('fetchPending:', e)
+    }
+  }
+  const fetchTrades = async () => {
+    try {
+      const res = await tradesAPI.open()
+      const trades = (res.data ?? []).map(t => ({
+        ...t,
+        type:       t.trade_type,
+        lot:        t.lot_size,
+        vol:        t.volume,
+        entryPrice: Number(t.entry_price),
+        tpPrice:    t.tp_price    ? Number(t.tp_price)  : null,
+        slPrice:    t.sl_price    ? Number(t.sl_price)  : null,
+        entryStr:   String(t.entry_price),
+        tpStr:      t.tp_price    ? String(t.tp_price)  : null,
+        slStr:      t.sl_price    ? String(t.sl_price)  : null,
+        pnl:        0,
+        pips:       0,
+        margin:     Number(t.margin ?? 0),
+        status:     'active',
+      }))
+      setOpenTrades(trades)
+    } catch (e) {
+      console.error('fetchTrades:', e)
+    }
+  }
+
+  // Poll: check for updates every 3 seconds
+  useEffect(() => {
+    fetchTrades()
+    fetchPending()
+    const id = setInterval(() => {
+      fetchTrades()
+      fetchWallet()
+      fetchPending()
+    }, 3000)
+    return () => clearInterval(id)
+  }, []) // Remove dependency on pendingOrders.length to prevent infinite loops
+  const peterApplyingRef    = useRef(false);
+  const livePriceRef        = useRef(BASE_PRICES["USD/ZAR"]);
+  const activatingOrdersRef = useRef(new Set());
+  const isPlacingRef        = useRef(false); // prevent double-tap order placement
+  const closingTradesRef    = useRef(new Set()); // prevent duplicate TP/SL processing
+  const recentOrderIdsRef   = useRef(new Set()); // prevent processing of recently placed orders
   useEffect(() => { livePriceRef.current = livePrice; }, [livePrice]);
 
-useEffect(() => {
-  walletAPI.get().then(r => setBalance(parseFloat(r.data.available_balance ?? 0))).catch(()=>{});
-}, []);
-
   // Live price drift
-  useEffect(() => { setLivePrice(BASE_PRICES[symbol]); }, [symbol]);
+  // Seed live price from backend when symbol changes, fallback to BASE_PRICES
+  useEffect(() => {
+    setLivePrice(BASE_PRICES[symbol])
+    pricesAPI.get(symbol)
+      .then(res => {
+        const p = res.data?.price
+        // Backend returns real market price — only use if reasonably close to BASE_PRICES
+        // (within 20%) to avoid scale mismatches
+        if (p && p > 0) {
+          const base = BASE_PRICES[symbol]
+          const ratio = p / base
+          if (ratio > 0.8 && ratio < 1.2) {
+            setLivePrice(p)
+          }
+        }
+      })
+      .catch(() => {})
+  }, [symbol]);
   useEffect(() => {
     const id = setInterval(() => {
       setLivePrice(prev => {
@@ -46,7 +160,7 @@ useEffect(() => {
   }, [symbol]);
 
   const [resultToast,  setResultToast]  = useState(null);
-  const [pendingOrders,setPendingOrders] = useState([]); // waiting for price to hit entry
+
 
   // Main price monitor — activates pending orders + updates P&L + auto-closes on TP/SL
   useEffect(() => {
@@ -58,13 +172,35 @@ useEffect(() => {
         if (prev.length === 0) return prev;
         const stillPending = [];
         for (const o of prev) {
+          // Skip if already being activated
+          if (activatingOrdersRef.current.has(o.id)) {
+            stillPending.push(o);
+            continue;
+          }
+          
           const entryHit =
             (o.type==="BUY"  && cur >= o.entryPrice) ||
             (o.type==="SELL" && cur <= o.entryPrice);
           if (entryHit) {
-            setOpenTrades(t => [...t, { ...o, status:"active", activatedAt: Date.now() }]);
+            console.log(`Activating order ${o.id} - ${o.type} ${o.symbol} at ${cur}`)
+            activatingOrdersRef.current.add(o.id);
             setToast({ type:"ENTRY_HIT", id:Date.now(), symbol:o.symbol, tradeType:o.type, entryStr:o.entryStr, tpStr:o.tpStr||"–", slStr:o.slStr||"–", lot:o.lot, vol:o.vol });
             setTimeout(()=>setToast(p=>p?.type==="ENTRY_HIT"?null:p), 4000);
+            ordersAPI.activate(o.id, cur)
+              .then(() => { 
+                console.log(`Successfully activated order ${o.id}`)
+                fetchTrades(); 
+                fetchWallet(); 
+                // Don't call fetchPending here - let polling handle it to avoid race conditions
+              })
+              .catch((err) => {
+                console.error('Failed to activate order:', err);
+              })
+              .finally(() => {
+                activatingOrdersRef.current.delete(o.id);
+              });
+            // Remove from pending list immediately to prevent re-processing
+            // The backend will handle the actual activation
           } else {
             stillPending.push(o);
           }
@@ -93,11 +229,35 @@ useEffect(() => {
           );
 
           if (tpHit || slHit) {
+            // Skip if this trade is already being closed
+            if (closingTradesRef.current.has(t.id)) {
+              remaining.push(updated);
+              continue;
+            }
+            
             const pip2   = t.tpPrice != null ? Math.abs(Math.round((t.tpPrice - t.entryPrice)/pip)) : Math.abs(Math.round((t.slPrice - t.entryPrice)/pip));
             const realPnl = tpHit ? Math.abs(pnl) : -Math.abs(pnl);
-            setBalance(b => b + t.margin + realPnl);
-            setResultToast({ id:Date.now(), hit:tpHit?"TP":"SL", pnl:realPnl, symbol:t.symbol, tradeType:t.type, pips:pip2 });
-            setTimeout(()=>setResultToast(null), 5000);
+            
+            // Mark as being closed to prevent duplicate processing
+            closingTradesRef.current.add(t.id);
+            
+            // Call backend to close the trade
+            tradesAPI.close(t.id)
+              .then(() => {
+                fetchTrades(); 
+                fetchWallet(); 
+                setResultToast({ id:Date.now(), hit:tpHit?"TP":"SL", pnl:realPnl, symbol:t.symbol, tradeType:t.type, pips:pip2 });
+                setTimeout(()=>setResultToast(null), 5000);
+              })
+              .catch(err => {
+                console.error('Failed to close trade on TP/SL hit:', err);
+                // If backend fails, add the trade back to the list
+                setOpenTrades(current => [...current, updated]);
+              })
+              .finally(() => {
+                // Always remove from the closing set, regardless of success/failure
+                closingTradesRef.current.delete(t.id);
+              });
           } else {
             remaining.push(updated);
           }
@@ -105,17 +265,25 @@ useEffect(() => {
         return remaining;
       });
     }, 600);
-    return () => clearInterval(id);
+    return () => {
+      clearInterval(id);
+      // Clean up any pending operations to prevent memory leaks
+      closingTradesRef.current.clear();
+      activatingOrdersRef.current.clear();
+      recentOrderIdsRef.current.clear();
+    };
   }, []);
 
   // Derived balances
-  const totalPnl       = openTrades.reduce((s,t)=>s+t.pnl,0);
-  const currentBalance = balance + totalPnl;
+  const totalPnl       = openTrades.reduce((s,t)=>s+(isNaN(t.pnl)?0:t.pnl),0);
+  const currentBalance = (isNaN(balance)?0:balance) + totalPnl;
 
   // Formatters
   const balFmt = v => {
-    const abs = Math.abs(v).toLocaleString("en-ZA",{minimumFractionDigits:2,maximumFractionDigits:2});
-    return (v<0?"−":"")+`ZAR ${abs}`;
+    const n = Number(v);
+    if (isNaN(n)) return "ZAR 0,00";
+    const abs = Math.abs(n).toLocaleString("en-ZA",{minimumFractionDigits:2,maximumFractionDigits:2});
+    return (n<0?"−":"")+`ZAR ${abs}`;
   };
   const zarFmt = v => v!=null ? `ZAR ${Math.abs(v).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g,",")}` : "ZAR 0,00";
   const priceFmt = v => {
@@ -141,68 +309,110 @@ useEffect(() => {
 
   const resetOrder = () => { setEntry(null); setTakeProfit(null); setStopLoss(null); setLotSize(null); setVolume(1); };
 
-  // Close one or all active trades — realise P&L back into balance
-  const handleCloseTrade = (idOrAll) => {
-    // Cancel pending orders too
-    setPendingOrders(prev => {
-      const toCancel = idOrAll==="all" ? prev : prev.filter(o=>o.id===idOrAll);
-      const margin   = toCancel.reduce((s,o)=>s+o.margin,0);
-      if (margin>0) setBalance(b => b + margin);
-      return idOrAll==="all" ? [] : prev.filter(o=>o.id!==idOrAll);
-    });
-    // Close active trades
-    setOpenTrades(prev => {
-      const toClose  = idOrAll==="all" ? prev : prev.filter(t=>t.id===idOrAll);
-      const realised = toClose.reduce((s,t)=>s+t.pnl,0);
-      const margin   = toClose.reduce((s,t)=>s+t.margin,0);
-      setBalance(b => b + margin + realised);
-      return idOrAll==="all" ? [] : prev.filter(t=>t.id!==idOrAll);
-    });
+  // Close one or all trades — hits backend then refreshes
+  const handleCloseTrade = async (idOrAll) => {
+    try {
+      if (idOrAll === "all") {
+        // Cancel all pending orders
+        for (const o of pendingOrders) {
+          await ordersAPI.cancel(o.id).catch(() => {})
+        }
+        setPendingOrders([])
+        await tradesAPI.closeAll()
+      } else {
+        // Check if it's a pending order or open trade
+        const isPending = pendingOrders.some(o => o.id === idOrAll)
+        if (isPending) {
+          await ordersAPI.cancel(idOrAll)
+          setPendingOrders(prev => prev.filter(o => o.id !== idOrAll))
+        } else {
+          await tradesAPI.close(idOrAll)
+        }
+      }
+      await fetchTrades()
+      await fetchWallet()
+      await fetchPending()
+    } catch (e) {
+      console.error('handleCloseTrade:', e)
+      await fetchTrades()
+      await fetchWallet()
+      await fetchPending()
+    }
   };
 
   // Place a limit order — waits for market to reach entry price
-  const handleTrade = type => {
+  const handleTrade = async type => {
+    if (isPlacingRef.current) return;
     if (type==="BUY"&&!canBuy)   return;
     if (type==="SELL"&&!canSell) return;
 
-    if (balance <= 0) {
+    if (availableBalance <= 0) {
       setToast({type:"NOFUNDS", id:Date.now()});
       setTimeout(()=>setToast(null),3000);
       return;
     }
 
-    const id     = Date.now();
-    const lot    = lotSize?.label ?? "Mini";
-    const vol    = volume;
-    const pipVal = LOT_SIZES.find(l=>l.label===lot)?.pip ?? 1;
-    const margin = Math.max(50, pipVal * vol * 20);
-    const cur    = livePriceRef.current;
-    // If no entry set, place entry slightly ahead of current price in trade direction
-    const dec    = cur > 10000 ? 2 : cur > 100 ? 2 : 4;
+    const lot  = lotSize?.label ?? "Mini";
+    const vol  = volume;
+    const cur  = livePriceRef.current;
+    const dec  = cur > 10000 ? 2 : cur > 100 ? 2 : 4;
     const defaultEntry = type==="BUY"
-      ? parseFloat((cur * 1.002).toFixed(dec))   // BUY stop: slightly above current
-      : parseFloat((cur * 0.998).toFixed(dec));   // SELL stop: slightly below current
+      ? parseFloat((cur * 1.002).toFixed(dec))
+      : parseFloat((cur * 0.998).toFixed(dec));
     const entryP = entry ?? defaultEntry;
     const tpP    = takeProfit;
     const slP    = stopLoss;
 
-    const order = {
-      id, type, symbol, lot, vol, margin,
-      entryPrice:    entryP,
-      placedAtPrice: cur,
-      entryStr:   priceFmt(entryP),
-      tpStr:      tpP!=null ? priceFmt(tpP) : null,
-      slStr:      slP!=null ? priceFmt(slP) : null,
-      tpPrice: tpP, slPrice: slP,
-      time: new Date().toLocaleTimeString("en-ZA",{hour:"2-digit",minute:"2-digit"}),
-      pnl: 0, pips: 0, status:"pending",
-    };
+    try {
+      isPlacingRef.current = true;
+      console.log(`Placing ${type} order for ${symbol} at ${entryP}`)
+      const res = await ordersAPI.place({
+        symbol,
+        market,
+        order_type:  type,
+        lot_size:    lot,
+        volume:      vol,
+        entry_price: entryP,
+        tp_price:    tpP ?? undefined,
+        sl_price:    slP ?? undefined,
+      });
 
-    setPendingOrders(prev=>[...prev, order]);
-    setBalance(b => b - margin);
-    setToast({ type:"PENDING", id, symbol, tradeType:type, entryStr:order.entryStr, tpStr:order.tpStr||"–", slStr:order.slStr||"–", lot, vol });
-    setTimeout(()=>setToast(p=>p?.id===id?null:p), 4000);
-    resetOrder();
+      const backendOrder = res.data;
+      const id     = backendOrder.id;
+      console.log(`Order placed successfully: ${id}`)
+      
+      // Track this order ID to prevent duplicate processing
+      recentOrderIdsRef.current.add(id);
+      // Clean up after 5 seconds to prevent memory leak
+      setTimeout(() => recentOrderIdsRef.current.delete(id), 5000);
+      const pipVal = LOT_SIZES.find(l=>l.label===lot)?.pip ?? 1;
+      const margin = Math.max(50, pipVal * vol * 20);
+
+      const localOrder = {
+        id, type, symbol, lot, vol, margin,
+        entryPrice: entryP,
+        entryStr:   priceFmt(entryP),
+        tpStr:      tpP != null ? priceFmt(tpP) : null,
+        slStr:      slP != null ? priceFmt(slP) : null,
+        tpPrice: tpP, slPrice: slP,
+        time: new Date().toLocaleTimeString("en-ZA",{hour:"2-digit",minute:"2-digit"}),
+        pnl: 0, pips: 0, status: "pending",
+      };
+
+      // Only fetch wallet to update balance, let polling handle pending orders
+      fetchWallet();
+      setToast({ type:"PENDING", id, symbol, tradeType:type, entryStr:localOrder.entryStr, tpStr:localOrder.tpStr||"–", slStr:localOrder.slStr||"–", lot, vol });
+      setTimeout(()=>setToast(p=>p?.id===id?null:p), 4000);
+      resetOrder();
+
+    } catch (err) {
+      const msg = err.response?.data?.detail || "Order failed";
+      console.error("handleTrade:", msg);
+      setToast({ type:"NOFUNDS", id:Date.now() });
+      setTimeout(()=>setToast(null), 3000);
+    } finally {
+      isPlacingRef.current = false;
+    }
   };
 
   const handlePeterApply = (rec) => {
@@ -415,15 +625,17 @@ useEffect(() => {
         )}
         {showWallet && (
           <WalletModal balance={balance} openTrades={openTrades}
-            onDeposit={async n => { await walletAPI.deposit(n); const r = await walletAPI.get(); setBalance(parseFloat(r.data.available_balance)); }}
-            onWithdraw={async n => { await walletAPI.withdraw(n); const r = await walletAPI.get(); setBalance(parseFloat(r.data.available_balance)); }}
+            onDeposit={async n => { await walletAPI.deposit(n); await fetchWallet(); }}
+            onWithdraw={async n => { await walletAPI.withdraw(n); await fetchWallet(); }}
             onCloseAll={handleCloseTrade}
             onClose={()=>setShowWallet(false)}/>
         )}
         {showPeter && (
           <PeterModal onClose={()=>setShowPeter(false)} onApply={handlePeterApply}
             livePrice={livePrice} symbol={symbol} market={market}
-            usageCount={peterUsage} onUseRequest={()=>setPeterUsage(n=>n+1)}/>
+            usageCount={peterUsage} onUseRequest={()=>setPeterUsage(n=>n+1)}
+            isSubscribed={isSubscribed}
+            onSubscribed={async () => { await fetchSubscription(); await fetchWallet(); }}/>
         )}
 
         <div style={{position:"relative",zIndex:1}}>
@@ -486,7 +698,7 @@ useEffect(() => {
           {(openTrades.length > 0 || pendingOrders.length > 0) && (
             <div style={{background:"#06060f",borderBottom:`1px solid ${C.border}`,padding:"6px 16px",display:"flex",gap:8,overflowX:"auto"}}>
               {pendingOrders.map(o=>(
-                <div key={o.id} onClick={()=>setShowWallet(true)} style={{
+                <div key={`pending-${o.id}`} onClick={()=>setShowWallet(true)} style={{
                   flexShrink:0,display:"flex",alignItems:"center",gap:6,
                   background:"#0d0820",border:"1px solid #a78bfa44",
                   borderRadius:6,padding:"5px 10px",cursor:"pointer",
@@ -498,7 +710,7 @@ useEffect(() => {
                 </div>
               ))}
               {openTrades.map(t=>(
-                <div key={t.id} onClick={()=>setShowWallet(true)} style={{
+                <div key={`open-${t.id}`} onClick={()=>setShowWallet(true)} style={{
                   flexShrink:0,display:"flex",alignItems:"center",gap:6,
                   background:"#0a0a1e",border:`1px solid ${t.pnl>=0?"#22c55e33":"#ef444433"}`,
                   borderRadius:6,padding:"5px 10px",cursor:"pointer",
