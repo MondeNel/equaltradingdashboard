@@ -10,11 +10,6 @@ export const LOT_SIZES = [
   { label:"Standard", sublabel:"$10",   pip:10.0 },
 ];
 
-export const BASE_PRICES = {
-  "BTC/USD":68420.50, "ETH/USD":3821.10, "SOL/USD":182.40, "XRP/USD":0.62,
-  "USD/ZAR":18.02,    "EUR/USD":1.0842,  "GBP/USD":1.2710, "USD/JPY":149.82,
-  "APPLE":189.45, "TESLA":248.90, "NVIDIA":875.60, "AMAZON":182.30,
-};
 
 export const USD_TO_ZAR = 18.02;
 export const HISTORY    = 120;
