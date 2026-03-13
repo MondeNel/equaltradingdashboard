@@ -16,6 +16,7 @@ export default function TradingDashboard() {
   const [takeProfit,   setTakeProfit]   = useState(null);
   const [stopLoss,     setStopLoss]     = useState(null);
   const [livePrice,    setLivePrice]    = useState(0);
+  const [chartPrice,   setChartPrice]   = useState(0);
   const [toast,        setToast]        = useState(null);
   const [resultToast,  setResultToast]  = useState(null);
   const [showPeter,    setShowPeter]    = useState(false);
@@ -27,6 +28,9 @@ export default function TradingDashboard() {
   const [openTrades,       setOpenTrades]       = useState([]);
   const [pendingOrders,    setPendingOrders]    = useState([]);
 
+  // displayPrice: chart drift price (400ms) when available, else real API price
+  const displayPrice = chartPrice > 0 ? chartPrice : livePrice;
+
   // ── Refs ───────────────────────────────────────────────────────────────────
   const activatingOrdersRef = useRef(new Set());
   const closingTradesRef    = useRef(new Set());
@@ -34,8 +38,8 @@ export default function TradingDashboard() {
   const livePriceRef        = useRef(0);
   const isPlacingRef        = useRef(false);
 
-  // Keep ref in sync with state for use inside setInterval callbacks
-  useEffect(() => { livePriceRef.current = livePrice; }, [livePrice]);
+  // Keep ref in sync with chart drift price so P&L monitor uses smoothed price
+  useEffect(() => { livePriceRef.current = displayPrice; }, [displayPrice]);
 
   // ── Subscription ───────────────────────────────────────────────────────────
   const fetchSubscription = async () => {
@@ -120,7 +124,7 @@ export default function TradingDashboard() {
     }
   };
 
-  // ── Poll trades + wallet (fast when orders pending) ────────────────────────
+  // ── Poll trades + wallet ───────────────────────────────────────────────────
   useEffect(() => {
     fetchTrades();
     fetchPending();
@@ -134,7 +138,7 @@ export default function TradingDashboard() {
     return () => clearInterval(id);
   }, [pendingOrders.length]);
 
-  // ── Real-time price — poll backend every 2s (CoinGecko / Frankfurter) ──────
+  // ── Real-time price — poll backend every 2s ────────────────────────────────
   useEffect(() => {
     let cancelled = false;
     const fetchPrice = async () => {
@@ -145,7 +149,7 @@ export default function TradingDashboard() {
       } catch (e) {}
     };
     fetchPrice();
-    const id = setInterval(fetchPrice, 400);
+    const id = setInterval(fetchPrice, 2000);
     return () => { cancelled = true; clearInterval(id); };
   }, [symbol]);
 
@@ -155,7 +159,6 @@ export default function TradingDashboard() {
       const cur = livePriceRef.current;
       if (!cur) return;
 
-      // Activate pending orders when market reaches entry price
       setPendingOrders(prev => {
         if (prev.length === 0) return prev;
         const stillPending = [];
@@ -173,7 +176,6 @@ export default function TradingDashboard() {
                 .catch(() => {})
                 .finally(() => { activatingOrdersRef.current.delete(o.id); fetchPending(); });
             }
-            // Always remove from local pending so interval doesn't re-trigger
           } else {
             stillPending.push(o);
           }
@@ -181,7 +183,6 @@ export default function TradingDashboard() {
         return stillPending;
       });
 
-      // Update P&L + auto-close on TP/SL
       setOpenTrades(prev => {
         const remaining = [];
         for (const t of prev) {
@@ -204,7 +205,7 @@ export default function TradingDashboard() {
           if (tpHit || slHit) {
             if (closingTradesRef.current.has(t.id)) continue;
             closingTradesRef.current.add(t.id);
-            const pip2     = t.tpPrice != null
+            const pip2    = t.tpPrice != null
               ? Math.abs(Math.round((t.tpPrice - t.entryPrice) / pip))
               : Math.abs(Math.round((t.slPrice - t.entryPrice) / pip));
             const realPnl  = tpHit ? Math.abs(pnl) : -Math.abs(pnl);
@@ -222,7 +223,7 @@ export default function TradingDashboard() {
         }
         return remaining;
       });
-    }, 600);
+    }, 400);
     return () => clearInterval(id);
   }, []);
 
@@ -237,20 +238,20 @@ export default function TradingDashboard() {
     const abs = Math.abs(n).toLocaleString("en-ZA", { minimumFractionDigits:2, maximumFractionDigits:2 });
     return (n < 0 ? "−" : "") + `ZAR ${abs}`;
   };
-  const zarFmt  = v => v != null ? `ZAR ${Math.abs(v).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ",")}` : "ZAR 0,00";
+  const zarFmt   = v => v != null ? `ZAR ${Math.abs(v).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ",")}` : "ZAR 0,00";
   const priceFmt = v => {
     if (v == null) return "–";
-    return livePrice > 10000
+    return displayPrice > 10000
       ? v.toLocaleString("en-ZA", { minimumFractionDigits:2 })
-      : livePrice > 100 ? v.toFixed(2) : v.toFixed(4);
+      : displayPrice > 100 ? v.toFixed(2) : v.toFixed(4);
   };
 
-  // ── Pip / ZAR calc for display ─────────────────────────────────────────────
+  // ── Pip / ZAR calc ─────────────────────────────────────────────────────────
   const calcPips = (a, b) => {
     if (a == null || b == null || !lotSize) return null;
     const diff = Math.abs(a - b);
     if (!diff) return null;
-    const pip  = livePrice < 10 ? 0.0001 : livePrice < 200 ? 0.0001 : 1;
+    const pip  = displayPrice < 10 ? 0.0001 : displayPrice < 200 ? 0.0001 : 1;
     const pips = diff / pip;
     const zar  = pips * lotSize.pip * volume * (symbol.includes("ZAR") ? 1 : USD_TO_ZAR);
     return { pips: Math.round(pips), zar };
@@ -296,13 +297,11 @@ export default function TradingDashboard() {
     if (isPlacingRef.current) return;
     if (type === "BUY"  && !canBuy)  return;
     if (type === "SELL" && !canSell) return;
-
     if (availableBalance <= 0) {
       setToast({ type:"NOFUNDS", id:Date.now() });
       setTimeout(() => setToast(null), 3000);
       return;
     }
-
     const lot = lotSize?.label ?? "Mini";
     const vol = volume;
     const cur = livePriceRef.current;
@@ -311,12 +310,10 @@ export default function TradingDashboard() {
       ? parseFloat((cur * 1.002).toFixed(dec))
       : parseFloat((cur * 0.998).toFixed(dec));
     const entryP = entry ?? defaultEntry;
-
     try {
       isPlacingRef.current = true;
       const res = await ordersAPI.place({
-        symbol,
-        market,
+        symbol, market,
         order_type:  type,
         lot_size:    lot,
         volume:      vol,
@@ -324,7 +321,6 @@ export default function TradingDashboard() {
         tp_price:    takeProfit ?? undefined,
         sl_price:    stopLoss   ?? undefined,
       });
-
       const id     = res.data.id;
       const pipVal = LOT_SIZES.find(l => l.label === lot)?.pip ?? 1;
       const margin = Math.max(50, pipVal * vol * 20);
@@ -337,7 +333,6 @@ export default function TradingDashboard() {
         tpPrice: takeProfit, slPrice: stopLoss,
         pnl: 0, pips: 0, status: "pending",
       };
-
       fetchWallet();
       fetchPending();
       setToast({ type:"PENDING", id, symbol, tradeType:type, entryStr:localOrder.entryStr, tpStr:localOrder.tpStr||"–", slStr:localOrder.slStr||"–", lot, vol });
@@ -354,7 +349,7 @@ export default function TradingDashboard() {
 
   // ── Peter apply ────────────────────────────────────────────────────────────
   const handlePeterApply = rec => {
-    const dec  = livePrice > 100 ? 2 : 4;
+    const dec  = displayPrice > 100 ? 2 : 4;
     const snap = v => parseFloat(Number(v).toFixed(dec));
     peterApplyingRef.current = true;
     if (rec.recommendedMarket) setMarket(rec.recommendedMarket);
@@ -374,12 +369,11 @@ export default function TradingDashboard() {
   const changeSymbol = s => { if (peterApplyingRef.current) return; setSymbol(s); setSymbolOpen(false); resetOrder(); };
 
   const handleLineBtn = key => {
-    const dec  = livePrice > 100 ? 2 : 4;
-    const mid  = livePrice;
+    const dec  = displayPrice > 100 ? 2 : 4;
     const snap = v => parseFloat(v.toFixed(dec));
-    if (key === "entry") setEntry(e      => e != null ? null : snap(mid));
-    if (key === "tp")    setTakeProfit(t => t != null ? null : snap(mid * 1.003));
-    if (key === "sl")    setStopLoss(s   => s != null ? null : snap(mid * 0.997));
+    if (key === "entry") setEntry(e      => e != null ? null : snap(displayPrice));
+    if (key === "tp")    setTakeProfit(t => t != null ? null : snap(displayPrice * 1.003));
+    if (key === "sl")    setStopLoss(s   => s != null ? null : snap(displayPrice * 0.997));
   };
 
   const dropStyle = open => ({
@@ -400,7 +394,6 @@ export default function TradingDashboard() {
     <div style={{minHeight:"100vh",background:C.bg,display:"flex",justifyContent:"center",fontFamily:"'Courier New',monospace"}}>
       <div style={{width:"100%",maxWidth:"420px",minHeight:"100vh",background:`linear-gradient(180deg,${C.panel} 0%,${C.bg} 100%)`,position:"relative"}}>
 
-        {/* Scanlines */}
         <div style={{position:"absolute",inset:0,pointerEvents:"none",zIndex:0,
           backgroundImage:"repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(167,139,250,0.008) 2px,rgba(167,139,250,0.008) 4px)"}}/>
 
@@ -486,7 +479,7 @@ export default function TradingDashboard() {
           </div>
         )}
 
-        {/* ── Result Toast (TP / SL hit) ── */}
+        {/* ── Result Toast ── */}
         {resultToast && (
           <div style={{position:"fixed",top:0,left:"50%",transform:"translateX(-50%)",zIndex:160,width:"92%",maxWidth:360,padding:"12px 0 0",pointerEvents:"none"}}>
             <style>{`
@@ -515,8 +508,7 @@ export default function TradingDashboard() {
                 </div>
               </div>
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",
-                background: resultToast.hit==="TP" ? "#022010" : "#1a0505",
-                borderRadius:8,padding:"10px 14px",marginBottom:10}}>
+                background: resultToast.hit==="TP" ? "#022010" : "#1a0505",borderRadius:8,padding:"10px 14px",marginBottom:10}}>
                 <div>
                   <div style={{color:"#5050a0",fontSize:8,letterSpacing:2,marginBottom:3}}>{resultToast.hit==="TP" ? "PROFIT REALISED" : "LOSS REALISED"}</div>
                   <div style={{color: resultToast.pnl>=0?"#4ade80":"#f87171",fontSize:22,fontWeight:"bold",letterSpacing:1}}>
@@ -546,7 +538,7 @@ export default function TradingDashboard() {
         )}
         {showPeter && (
           <PeterModal onClose={() => setShowPeter(false)} onApply={handlePeterApply}
-            livePrice={livePrice} symbol={symbol} market={market}
+            livePrice={displayPrice} symbol={symbol} market={market}
             usageCount={peterUsage} onUseRequest={() => setPeterUsage(n => n + 1)}
             isSubscribed={isSubscribed}
             onSubscribed={async () => { await fetchSubscription(); await fetchWallet(); }}/>
@@ -584,46 +576,28 @@ export default function TradingDashboard() {
                   <line x1="2" y1="38.5" x2="22" y2="38.5" stroke="#38bdf8" strokeWidth="1.5" strokeLinecap="round" opacity="0.7"/>
                 </svg>
               </div>
-
-              {/* Account Balance */}
               <div style={{display:"flex",justifyContent:"space-between",marginBottom:5}}>
                 <span style={{color:C.balLabel,fontSize:10,letterSpacing:1}}>ACCOUNT BALANCE</span>
-                <span style={{
-                  color: balance < 0 ? "#f87171" : balance === 0 ? "#4a4a78" : C.balVal,
-                  fontSize:13, fontWeight:"bold", letterSpacing:1,
-                }}>
-                  {balance === 0
-                    ? "ZAR 0,00"
-                    : balance < 0
-                      ? `− ZAR ${Math.abs(balance).toLocaleString("en-ZA",{minimumFractionDigits:2,maximumFractionDigits:2})}`
-                      : balFmt(balance)}
+                <span style={{color: balance<0?"#f87171":balance===0?"#4a4a78":C.balVal, fontSize:13,fontWeight:"bold",letterSpacing:1}}>
+                  {balance===0 ? "ZAR 0,00" : balance<0
+                    ? `− ZAR ${Math.abs(balance).toLocaleString("en-ZA",{minimumFractionDigits:2,maximumFractionDigits:2})}`
+                    : balFmt(balance)}
                 </span>
               </div>
-
-              {/* Current Balance */}
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
                 <span style={{color:C.balLabel,fontSize:10,letterSpacing:1}}>CURRENT BALANCE</span>
-                <span style={{
-                  color: currentBalance < 0 ? "#f87171" : currentBalance > balance ? "#4ade80" : C.balVal,
-                  fontSize:13, fontWeight:"bold", letterSpacing:1,
-                }}>
-                  {currentBalance < 0
+                <span style={{color: currentBalance<0?"#f87171":currentBalance>balance?"#4ade80":C.balVal, fontSize:13,fontWeight:"bold",letterSpacing:1}}>
+                  {currentBalance<0
                     ? `− ZAR ${Math.abs(currentBalance).toLocaleString("en-ZA",{minimumFractionDigits:2,maximumFractionDigits:2})}`
                     : balFmt(currentBalance)}
                 </span>
               </div>
-
-              {/* Deficit warning */}
-              {balance < 0 && (
+              {balance<0 && (
                 <div style={{marginTop:6,padding:"5px 8px",background:"#2a080833",border:"1px solid #ef444444",borderRadius:6}}>
-                  <span style={{color:"#f87171",fontSize:8,letterSpacing:1}}>
-                    ⚠ ACCOUNT IN DEFICIT — DEPOSIT FUNDS BEFORE TRADING
-                  </span>
+                  <span style={{color:"#f87171",fontSize:8,letterSpacing:1}}>⚠ ACCOUNT IN DEFICIT — DEPOSIT FUNDS BEFORE TRADING</span>
                 </div>
               )}
             </div>
-
-            {/* Peter AI button */}
             <button onClick={() => setShowPeter(true)} style={{
               width:42,height:42,borderRadius:"50%",flexShrink:0,
               background:"linear-gradient(135deg,#3b0764,#6d28d9)",
@@ -633,7 +607,7 @@ export default function TradingDashboard() {
             }}>AI</button>
           </div>
 
-          {/* Positions strip — pending + active */}
+          {/* Positions strip */}
           {(openTrades.length > 0 || pendingOrders.length > 0) && (
             <div style={{background:"#06060f",borderBottom:`1px solid ${C.border}`,padding:"6px 16px",display:"flex",gap:8,overflowX:"auto"}}>
               {pendingOrders.map(o => (
@@ -689,8 +663,8 @@ export default function TradingDashboard() {
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
               <span style={{color:C.symbolCol,fontSize:13,fontWeight:"bold",letterSpacing:2}}>{symbol}</span>
               <span style={{color:C.priceCol,fontSize:16,fontWeight:"bold",fontVariantNumeric:"tabular-nums"}}>
-                {livePrice > 0
-                  ? livePrice.toLocaleString("en-ZA",{minimumFractionDigits:2,maximumFractionDigits:livePrice>100?2:4})
+                {displayPrice > 0
+                  ? displayPrice.toLocaleString("en-ZA",{minimumFractionDigits:2,maximumFractionDigits:displayPrice>100?2:4})
                   : "—"}
               </span>
             </div>
@@ -699,6 +673,7 @@ export default function TradingDashboard() {
               entry={entry} takeProfit={takeProfit} stopLoss={stopLoss}
               onEntry={setEntry} onTP={setTakeProfit} onSL={setStopLoss}
               openTrades={openTrades} pendingOrders={pendingOrders}
+              onPriceUpdate={setChartPrice}
             />
           </div>
 
@@ -713,8 +688,7 @@ export default function TradingDashboard() {
                     flex:1,padding:"5px 3px",
                     background: sel?"#1a0a3a":"#0a0a18",
                     border:`1.5px solid ${sel?C.lotSelBorder:C.border}`,
-                    borderRadius:5,cursor:"pointer",
-                    color:sel?C.lotSelText:C.label,
+                    borderRadius:5,cursor:"pointer",color:sel?C.lotSelText:C.label,
                     fontFamily:"inherit",transition:"all 0.15s",
                   }}>
                     <div style={{fontSize:9,fontWeight:"bold",letterSpacing:1}}>{ls.label}</div>
@@ -729,9 +703,9 @@ export default function TradingDashboard() {
           <div style={{padding:"8px 16px",borderBottom:`1px solid ${C.border}`,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
             <div style={{color:C.labelDim,fontSize:8,letterSpacing:2}}>VOLUME</div>
             <div style={{display:"flex",alignItems:"center",gap:8}}>
-              <button onClick={() => setVolume(v => Math.max(1, v-1))} style={{background:"#0a0a18",border:`1px solid ${C.border}`,color:C.volText,width:26,height:26,borderRadius:4,cursor:"pointer",fontSize:15,fontFamily:"inherit"}}>−</button>
+              <button onClick={() => setVolume(v => Math.max(1,v-1))} style={{background:"#0a0a18",border:`1px solid ${C.border}`,color:C.volText,width:26,height:26,borderRadius:4,cursor:"pointer",fontSize:15,fontFamily:"inherit"}}>−</button>
               <div style={{background:"#0a0a18",border:`1px solid ${C.volBorder}`,color:C.volText,padding:"3px 16px",borderRadius:4,fontSize:13,fontWeight:"bold",minWidth:32,textAlign:"center"}}>{volume}</div>
-              <button onClick={() => setVolume(v => Math.min(100, v+1))} style={{background:"#0a0a18",border:`1px solid ${C.border}`,color:C.volText,width:26,height:26,borderRadius:4,cursor:"pointer",fontSize:15,fontFamily:"inherit"}}>+</button>
+              <button onClick={() => setVolume(v => Math.min(100,v+1))} style={{background:"#0a0a18",border:`1px solid ${C.border}`,color:C.volText,width:26,height:26,borderRadius:4,cursor:"pointer",fontSize:15,fontFamily:"inherit"}}>+</button>
             </div>
           </div>
 
@@ -813,15 +787,10 @@ export default function TradingDashboard() {
           <div style={{borderTop:`1px solid ${C.border}`,padding:"14px 16px"}}>
             <button onClick={() => setShowWallet(true)} style={{
               width:"100%",padding:"14px 20px",borderRadius:10,cursor:"pointer",
-              background: balance<0
-                ? "linear-gradient(135deg,#1a0606,#2d0a0a)"
-                : balance>0
-                  ? "linear-gradient(135deg,#061426,#082040)"
-                  : "linear-gradient(135deg,#140e04,#201a04)",
+              background: balance<0 ? "linear-gradient(135deg,#1a0606,#2d0a0a)" : balance>0 ? "linear-gradient(135deg,#061426,#082040)" : "linear-gradient(135deg,#140e04,#201a04)",
               border:`2px solid ${balance<0?"#ef4444":balance>0?"#38bdf8":"#facc15"}`,
               boxShadow:`0 0 22px ${balance<0?"#ef444422":balance>0?"#38bdf822":"#facc1522"}`,
-              fontFamily:"inherit",display:"flex",alignItems:"center",justifyContent:"space-between",
-              transition:"all 0.2s",
+              fontFamily:"inherit",display:"flex",alignItems:"center",justifyContent:"space-between",transition:"all 0.2s",
             }}>
               <div style={{display:"flex",alignItems:"center",gap:12}}>
                 <span style={{fontSize:20,color:balance<0?"#ef4444":balance>0?"#38bdf8":"#facc15"}}>⬡</span>
@@ -830,11 +799,7 @@ export default function TradingDashboard() {
                     {balance<0 ? "⚠ ACCOUNT IN DEFICIT" : balance>0 ? "WALLET" : "⬡ DEPOSIT TO TRADE"}
                   </div>
                   <div style={{color:balance<0?"#c08080":balance>0?"#5090b8":"#8a7040",fontSize:9,marginTop:2,letterSpacing:1}}>
-                    {balance<0
-                      ? "Deposit funds to restore your account"
-                      : balance>0
-                        ? `${openTrades.length} open position${openTrades.length!==1?"s":""}`
-                        : "Tap to add simulation funds"}
+                    {balance<0 ? "Deposit funds to restore your account" : balance>0 ? `${openTrades.length} open position${openTrades.length!==1?"s":""}` : "Tap to add simulation funds"}
                   </div>
                 </div>
               </div>

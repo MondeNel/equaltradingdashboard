@@ -1,7 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { HISTORY, VIEW, W, H, PAD, CW, CH, CHART_BG, CHART_BORDER, GRID_COL, AXIS_TEXT, BULL_COL, BEAR_COL, C } from "../constants";
 
-// Seed candles from real starting price — no BASE_PRICES needed
 function seedCandles(startPrice) {
   const out = [];
   let p = startPrice * 0.97;
@@ -14,7 +13,7 @@ function seedCandles(startPrice) {
   return out;
 }
 
-export default function CandleChart({ symbol, livePrice, entry, takeProfit, stopLoss, onEntry, onTP, onSL, openTrades = [], pendingOrders = [] }) {
+export default function CandleChart({ symbol, livePrice, entry, takeProfit, stopLoss, onEntry, onTP, onSL, openTrades = [], pendingOrders = [], onPriceUpdate }) {
   const svgRef      = useRef(null);
   const interactRef = useRef(null);
   const scaleRef    = useRef({ minP:0, maxP:1, range:1 });
@@ -24,8 +23,7 @@ export default function CandleChart({ symbol, livePrice, entry, takeProfit, stop
   const candlesRef  = useRef(null);
   const pinchRef    = useRef(null);
 
-  // driftRef: smoothly interpolated price for chart animation (800ms ticks)
-  const driftRef   = useRef(0);
+  const driftRef   = useRef(livePrice > 0 ? livePrice : 0);
   const prevSymRef = useRef(symbol);
   const seededRef  = useRef(false);
 
@@ -55,7 +53,7 @@ export default function CandleChart({ symbol, livePrice, entry, takeProfit, stop
     }
   }, [symbol]);
 
-  // When real price arrives, seed chart once per symbol, then just update target
+  // Seed chart once per symbol when real price arrives
   useEffect(() => {
     if (livePrice <= 0) return;
     lpRef.current = livePrice;
@@ -68,19 +66,21 @@ export default function CandleChart({ symbol, livePrice, entry, takeProfit, stop
     }
   }, [livePrice]);
 
-  // 400ms tick — micro-drift toward real price to keep chart visually alive
+  // 400ms tick — micro-drift toward real price
   useEffect(() => {
     const id = setInterval(() => {
       tickRef.current++;
       const realPrice = lpRef.current;
-      if (realPrice <= 0) return;
+      if (realPrice <= 0 || !seededRef.current) return;
 
-      // Drift: 35% pull toward real price + tiny noise so candles breathe
       const prev  = driftRef.current > 0 ? driftRef.current : realPrice;
       const noise = (Math.random() - 0.49) * realPrice * 0.0003;
       const pull  = (realPrice - prev) * 0.35;
       const next  = prev + pull + noise;
       driftRef.current = next;
+
+      // Notify parent so price display + P&L stay in sync with chart
+      if (onPriceUpdate) onPriceUpdate(next);
 
       setCandles(prev => {
         const cs   = [...prev];
@@ -89,7 +89,6 @@ export default function CandleChart({ symbol, livePrice, entry, takeProfit, stop
         last.high  = Math.max(last.high, next);
         last.low   = Math.min(last.low,  next);
         cs[cs.length - 1] = last;
-        // New candle every 20 ticks (~8s)
         if (tickRef.current % 20 === 0) {
           last.done = true;
           cs.push({ open:next, close:next, high:next, low:next, done:false });
@@ -101,14 +100,12 @@ export default function CandleChart({ symbol, livePrice, entry, takeProfit, stop
     return () => clearInterval(id);
   }, []);
 
-  // Visible slice
   const total   = candles.length;
   const offset  = Math.min(panOffset, Math.max(0, total - zoomView));
   const start   = Math.max(0, total - zoomView - offset);
   const visible = candles.slice(start, start + zoomView);
   const isLive  = offset === 0;
 
-  // Scale
   const allP     = visible.flatMap(c => [c.high, c.low]);
   const rawMin   = Math.min(...allP) * 0.9993;
   const rawMax   = Math.max(...allP) * 1.0007;
@@ -247,7 +244,6 @@ export default function CandleChart({ symbol, livePrice, entry, takeProfit, stop
           ⌖ CENTRE
         </button>
       )}
-
       <div style={{ position:"absolute",bottom:10,right:8,zIndex:5,display:"flex",alignItems:"center",gap:3 }}>
         <button onClick={zoomOut} style={{ width:22,height:22,borderRadius:4,cursor:"pointer",background:"#12122a",border:"1px solid #2e2e58",color:"#8888c0",fontSize:14,fontWeight:"bold",lineHeight:1,display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"inherit" }}>−</button>
         <div style={{ padding:"2px 6px",borderRadius:4,background:"#0a0a1e",border:"1px solid #1e1e3a",color:"#5858a0",fontSize:8,letterSpacing:1,minWidth:28,textAlign:"center" }}>{zoomView}c</div>
@@ -261,7 +257,6 @@ export default function CandleChart({ symbol, livePrice, entry, takeProfit, stop
         onMouseDown={onBgDown} onTouchStart={onBgDown}>
 
         <defs><clipPath id="cc"><rect x={PAD.l} y={PAD.t} width={CW} height={CH}/></clipPath></defs>
-
         <rect x="0" y="0" width={W} height={H} fill={CHART_BG} rx="5"/>
         <rect x={PAD.l} y={PAD.t} width={CW} height={CH} fill={CHART_BG}/>
 
