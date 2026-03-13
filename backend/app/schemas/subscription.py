@@ -21,5 +21,7 @@ class SubscriptionResponse(BaseModel):
     peter_limit: int    # -1 = unlimited
     can_use_peter: bool
     expires_at: datetime | None
+    price_charged: float | None = None
+    new_balance: float | None = None
 
     model_config = {"from_attributes": True}

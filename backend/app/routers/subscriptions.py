@@ -8,6 +8,7 @@ from app.dependencies import get_current_user
 from app.models.user import User
 from app.models.subscription import Subscription, PLAN_LIMITS
 from app.schemas.subscription import PlanDetail, SubscriptionResponse, UpgradeRequest
+from app.services.wallet_service import get_or_create_wallet, withdraw
 
 router = APIRouter(prefix="/api/subscriptions", tags=["subscriptions"])
 
@@ -48,7 +49,7 @@ async def my_subscription(
     if not sub:
         sub = Subscription(user_id=current_user.id)
         db.add(sub)
-        await db.flush()
+        await db.commit()
     return SubscriptionResponse(
         plan=sub.plan,
         peter_uses_today=sub.peter_uses_today,
@@ -68,6 +69,16 @@ async def upgrade(
     if req.plan not in valid_plans:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Plan must be one of {valid_plans}")
 
+    # Get plan pricing
+    plan_prices = {"WEEKLY": 49.0, "MONTHLY": 149.0, "YEARLY": 999.0}
+    price_to_charge = plan_prices.get(req.plan, 0.0)
+    
+    # Charge wallet first
+    try:
+        await withdraw(current_user.id, price_to_charge, db)
+    except HTTPException as e:
+        raise HTTPException(status_code=status.HTTP_402_PAYMENT_REQUIRED, detail=str(e.detail))
+
     result = await db.execute(select(Subscription).where(Subscription.user_id == current_user.id))
     sub = result.scalar_one_or_none()
     if not sub:
@@ -85,7 +96,10 @@ async def upgrade(
     sub.started_at = now
     sub.expires_at = now + expiry_map[req.plan]
     sub.peter_uses_today = 0
-    await db.flush()
+    await db.commit()
+
+    # Get updated wallet for response
+    wallet = await get_or_create_wallet(current_user.id, db)
 
     return SubscriptionResponse(
         plan=sub.plan,
@@ -93,4 +107,6 @@ async def upgrade(
         peter_limit=sub.peter_limit,
         can_use_peter=sub.can_use_peter,
         expires_at=sub.expires_at,
+        price_charged=price_to_charge,
+        new_balance=wallet.balance,
     )

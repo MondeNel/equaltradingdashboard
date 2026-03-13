@@ -69,7 +69,9 @@ async def close_trade(
     )
 
     # Return margin + P&L to wallet
+    print(f"DEBUG: Releasing margin={trade.margin}, P&L={pnl} for user {user_id}")
     await release_margin(user_id, trade.margin, pnl, db)
+    print(f"DEBUG: Released margin successfully")
 
     # Write to history
     history = TradeHistory(

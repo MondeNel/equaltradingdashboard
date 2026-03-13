@@ -3,7 +3,7 @@ import { PLANS } from "../constants";
 import { subscriptionAPI } from "../services/api";
 
 export default function SubscriptionModal({ onClose, onSubscribed }) {
-  const [selected, setSelected]   = useState("monthly");
+  const [selected, setSelected]   = useState("MONTHLY");
   const [loading,  setLoading]    = useState(false);
   const [error,    setError]      = useState(null);
   const [success,  setSuccess]    = useState(null);
@@ -99,12 +99,12 @@ export default function SubscriptionModal({ onClose, onSubscribed }) {
             <div style={{ textAlign:"center", marginBottom:20, padding:"18px", background:"#06060f", borderRadius:12, border:`1px solid ${plan.color}44` }}>
               <div style={{ color:plan.color, fontSize:36, fontWeight:"bold", letterSpacing:2 }}>{plan.price}</div>
               <div style={{ color:"#7070a8", fontSize:10, letterSpacing:2, marginTop:2 }}>{plan.per}</div>
-              {selected==="yearly" && (
+              {selected==="YEARLY" && (
                 <div style={{ color:"#4ade80", fontSize:9, marginTop:8, letterSpacing:1, background:"#052e1622", padding:"4px 10px", borderRadius:6, display:"inline-block" }}>
                   💰 SAVE R 789 vs monthly billing
                 </div>
               )}
-              {selected==="weekly" && (
+              {selected==="WEEKLY" && (
                 <div style={{ color:"#38bdf8", fontSize:9, marginTop:8, letterSpacing:1 }}>
                   Perfect to try before committing
                 </div>

@@ -30,7 +30,7 @@ async def deposit(user_id: uuid.UUID, amount: Decimal, db: AsyncSession) -> Wall
         balance_after=wallet.balance,
     )
     db.add(tx)
-    await db.flush()
+    await db.commit()
     return wallet
 
 
@@ -61,7 +61,7 @@ async def withdraw(user_id: uuid.UUID, amount: Decimal, db: AsyncSession) -> Wal
         balance_after=wallet.balance,
     )
     db.add(tx)
-    await db.flush()
+    await db.commit()
     return wallet
 
 
@@ -81,7 +81,10 @@ async def reserve_margin(user_id: uuid.UUID, margin: Decimal, db: AsyncSession) 
 
 async def release_margin(user_id: uuid.UUID, margin: Decimal, pnl: Decimal, db: AsyncSession) -> Wallet:
     wallet = await get_or_create_wallet(user_id, db)
+    print(f"DEBUG: Before release - balance={wallet.balance}, reserved={wallet.reserved_margin}")
     wallet.reserved_margin = max(Decimal("0"), wallet.reserved_margin - margin)
     wallet.balance += pnl  # pnl can be negative (loss)
-    await db.flush()
+    print(f"DEBUG: After release - balance={wallet.balance}, reserved={wallet.reserved_margin}")
+    await db.commit()
+    print(f"DEBUG: Committed wallet changes")
     return wallet

@@ -50,17 +50,17 @@ export const BEAR_COL     = "#ef5350";
 
 export const PLANS = [
   {
-    id:"weekly", label:"WEEKLY", price:"R 49", per:"/week", color:"#38bdf8", badge:null,
+    id:"WEEKLY", label:"WEEKLY", price:"R 49", per:"/week", color:"#38bdf8", badge:null,
     features:["5 AI trade setups per day","Volatile market scanner","Best forex pair alerts","Entry / TP / SL auto-fill","Basic scalp strategies"],
     locked:["Multi-timeframe analysis","Risk-adjusted sizing","Pattern recognition AI","Priority support"],
   },
   {
-    id:"monthly", label:"MONTHLY", price:"R 149", per:"/month", color:"#a78bfa", badge:"POPULAR",
+    id:"MONTHLY", label:"MONTHLY", price:"R 149", per:"/month", color:"#a78bfa", badge:"POPULAR",
     features:["Unlimited AI trade setups","Volatile market scanner","Best forex pair alerts","Entry / TP / SL auto-fill","Multi-timeframe analysis","Risk-adjusted position sizing","Basic scalp strategies"],
     locked:["Pattern recognition AI","Priority support"],
   },
   {
-    id:"yearly", label:"YEARLY", price:"R 999", per:"/year", color:"#facc15", badge:"BEST VALUE",
+    id:"YEARLY", label:"YEARLY", price:"R 999", per:"/year", color:"#facc15", badge:"BEST VALUE",
     features:["Everything in Monthly","Pattern recognition AI","Real-time news sentiment","Custom strategy builder","Advanced risk management","Backtesting (30-day history)","Priority 24/7 support","Early access to new features"],
     locked:[],
   },

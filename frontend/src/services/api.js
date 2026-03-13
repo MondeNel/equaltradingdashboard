@@ -14,8 +14,12 @@ api.interceptors.response.use(
   res => res,
   err => {
     if (err.response?.status === 401) {
-      localStorage.removeItem('access_token')
-      window.location.reload()
+      const token = localStorage.getItem('access_token')
+      // Only force logout if we actually had a token (not a pre-auth request)
+      if (token) {
+        localStorage.removeItem('access_token')
+        window.location.reload()
+      }
     }
     return Promise.reject(err)
   }
@@ -42,10 +46,13 @@ export const ordersAPI = {
 }
 
 export const tradesAPI = {
-  open:     ()   => api.get('/trades/open'),
-  close:    (id) => api.post(`/trades/${id}/close`),
-  closeAll: ()   => api.post('/trades/close-all'),
-  history:  ()   => api.get('/trades/history'),
+  open:     ()                          => api.get('/trades/open'),
+  close:    (id, closePrice, reason)    => api.post(`/trades/${id}/close`, {
+    close_price: closePrice ?? null,
+    close_reason: reason ?? 'MANUAL',
+  }),
+  closeAll: ()                          => api.post('/trades/close-all'),
+  history:  ()                          => api.get('/trades/history'),
 }
 
 export const pricesAPI = {

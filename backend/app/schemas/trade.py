@@ -1,6 +1,7 @@
-from decimal import Decimal
-from datetime import datetime
 import uuid
+from decimal import Decimal
+from typing import Optional
+from datetime import datetime
 from pydantic import BaseModel
 
 
@@ -12,12 +13,13 @@ class TradeResponse(BaseModel):
     lot_size: str
     volume: int
     entry_price: Decimal
-    tp_price: Decimal | None
-    sl_price: Decimal | None
+    tp_price: Optional[Decimal] = None
+    sl_price: Optional[Decimal] = None
     margin: Decimal
-    activated_at: datetime
+    activated_at: Optional[datetime] = None
 
-    model_config = {"from_attributes": True}
+    class Config:
+        from_attributes = True
 
 
 class CloseTradeResponse(BaseModel):
@@ -26,23 +28,31 @@ class CloseTradeResponse(BaseModel):
     trade_type: str
     close_price: Decimal
     pnl: Decimal
-    pips: Decimal
+    pips: float
     close_reason: str
     margin_returned: Decimal
+
+    class Config:
+        from_attributes = True
 
 
 class TradeHistoryResponse(BaseModel):
     id: uuid.UUID
     symbol: str
+    market: str
     trade_type: str
     lot_size: str
     volume: int
     entry_price: Decimal
     close_price: Decimal
+    tp_price: Optional[Decimal] = None
+    sl_price: Optional[Decimal] = None
     pnl: Decimal
-    pips: Decimal
+    pips: float
     close_reason: str
-    opened_at: datetime
-    closed_at: datetime
+    margin_returned: Decimal
+    opened_at: Optional[datetime] = None
+    closed_at: Optional[datetime] = None
 
-    model_config = {"from_attributes": True}
+    class Config:
+        from_attributes = True

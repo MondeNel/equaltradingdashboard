@@ -1,6 +1,8 @@
 import uuid
 from decimal import Decimal
-from fastapi import APIRouter, Depends, Body
+from typing import Optional
+from fastapi import APIRouter, Depends
+from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -15,6 +17,11 @@ from app.services.trade_service import (
 router = APIRouter(prefix="/api/trades", tags=["trades"])
 
 
+class CloseRequest(BaseModel):
+    close_price: Optional[float] = None
+    close_reason: Optional[str] = "MANUAL"
+
+
 @router.get("/open", response_model=list[TradeResponse])
 async def list_open(
     current_user: User = Depends(get_current_user),
@@ -26,18 +33,19 @@ async def list_open(
 @router.post("/{trade_id}/close", response_model=CloseTradeResponse)
 async def close(
     trade_id: uuid.UUID,
+    req: CloseRequest = CloseRequest(),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    # Fetch live price from price service
-    trade_list = await get_open_trades(current_user.id, db)
-    trade = next((t for t in trade_list if t.id == trade_id), None)
-    if trade:
-        close_price = get_price(trade.symbol) or trade.entry_price
+    if req.close_price is not None:
+        price = Decimal(str(req.close_price))
     else:
-        close_price = Decimal("0")
-
-    return await close_trade(current_user.id, trade_id, close_price, "MANUAL", db)
+        trade_list = await get_open_trades(current_user.id, db)
+        trade = next((t for t in trade_list if t.id == trade_id), None)
+        backend_price = get_price(trade.symbol) if trade else None
+        price = Decimal(str(backend_price)) if backend_price else Decimal("0")
+    reason = req.close_reason or "MANUAL"
+    return await close_trade(current_user.id, trade_id, price, reason, db)
 
 
 @router.post("/close-all", response_model=list[CloseTradeResponse])
@@ -47,7 +55,7 @@ async def close_all(
 ):
     trades = await get_open_trades(current_user.id, db)
     current_prices = {
-        t.symbol: (get_price(t.symbol) or t.entry_price)
+        t.symbol: (Decimal(str(get_price(t.symbol))) if get_price(t.symbol) else t.entry_price)
         for t in trades
     }
     return await close_all_trades(current_user.id, current_prices, db)

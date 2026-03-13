@@ -42,22 +42,31 @@ export default function TradingDashboard() {
   const fetchWallet = async () => {
     try {
       const res = await walletAPI.get()
-      setBalance(Number(res.data.balance ?? 0))
-      setAvailableBalance(Number(res.data.available_balance ?? 0))
+      const bal = Number(res.data.balance ?? 0)
+      const avail = Number(res.data.available_balance ?? res.data.balance ?? 0)
+      setBalance(bal)
+      setAvailableBalance(avail)
     } catch (e) {
       console.error('fetchWallet:', e)
     }
   }
 
-  useEffect(() => { fetchWallet() }, [])
+  // Retry wallet fetch on mount — token may not be attached on first render
+  useEffect(() => {
+    fetchWallet()
+    const retryId = setTimeout(fetchWallet, 1500)
+    return () => clearTimeout(retryId)
+  }, [])
 
   // ── Trades — fetch open trades from backend ────────────────────────────────
+  const activatingOrdersRef = useRef(new Set());
+  const closingTradesRef    = useRef(new Set());
+
   const fetchPending = async () => {
     try {
       const res = await ordersAPI.list()
       const orders = (res.data ?? [])
-        .filter(o => !activatingOrdersRef.current.has(o.id)) // Skip orders being activated
-        .filter(o => !recentOrderIdsRef.current.has(o.id))     // Skip recently placed orders
+        .filter(o => !activatingOrdersRef.current.has(o.id))
         .map(o => ({
           id:         o.id,
           type:       o.order_type,
@@ -74,12 +83,6 @@ export default function TradingDashboard() {
           margin:     Number(o.margin ?? 0),
           pnl: 0, pips: 0, status: 'pending',
         }))
-      
-      // Debug: Log order count changes
-      if (orders.length !== pendingOrders.length) {
-        console.log(`Pending orders changed: ${pendingOrders.length} -> ${orders.length}`, orders.map(o => o.id))
-      }
-      
       setPendingOrders(orders)
     } catch (e) {
       console.error('fetchPending:', e)
@@ -110,23 +113,24 @@ export default function TradingDashboard() {
     }
   }
 
-  // Poll: check for updates every 3 seconds
+  // Poll: fast (2s) when pending orders exist, slow (8s) otherwise
   useEffect(() => {
     fetchTrades()
     fetchPending()
+    fetchWallet()
+    const interval = pendingOrders.length > 0 ? 2000 : 8000
     const id = setInterval(() => {
       fetchTrades()
       fetchWallet()
       fetchPending()
-    }, 3000)
+    }, interval)
     return () => clearInterval(id)
-  }, []) // Remove dependency on pendingOrders.length to prevent infinite loops
+  }, [pendingOrders.length])
   const peterApplyingRef    = useRef(false);
   const livePriceRef        = useRef(BASE_PRICES["USD/ZAR"]);
-  const activatingOrdersRef = useRef(new Set());
   const isPlacingRef        = useRef(false); // prevent double-tap order placement
-  const closingTradesRef    = useRef(new Set()); // prevent duplicate TP/SL processing
-  const recentOrderIdsRef   = useRef(new Set()); // prevent processing of recently placed orders
+
+  // Keep ref in sync for use inside setInterval callbacks
   useEffect(() => { livePriceRef.current = livePrice; }, [livePrice]);
 
   // Live price drift
@@ -172,35 +176,23 @@ export default function TradingDashboard() {
         if (prev.length === 0) return prev;
         const stillPending = [];
         for (const o of prev) {
-          // Skip if already being activated
-          if (activatingOrdersRef.current.has(o.id)) {
-            stillPending.push(o);
-            continue;
-          }
-          
           const entryHit =
             (o.type==="BUY"  && cur >= o.entryPrice) ||
             (o.type==="SELL" && cur <= o.entryPrice);
           if (entryHit) {
-            console.log(`Activating order ${o.id} - ${o.type} ${o.symbol} at ${cur}`)
-            activatingOrdersRef.current.add(o.id);
-            setToast({ type:"ENTRY_HIT", id:Date.now(), symbol:o.symbol, tradeType:o.type, entryStr:o.entryStr, tpStr:o.tpStr||"–", slStr:o.slStr||"–", lot:o.lot, vol:o.vol });
-            setTimeout(()=>setToast(p=>p?.type==="ENTRY_HIT"?null:p), 4000);
-            ordersAPI.activate(o.id, cur)
-              .then(() => { 
-                console.log(`Successfully activated order ${o.id}`)
-                fetchTrades(); 
-                fetchWallet(); 
-                // Don't call fetchPending here - let polling handle it to avoid race conditions
-              })
-              .catch((err) => {
-                console.error('Failed to activate order:', err);
-              })
-              .finally(() => {
-                activatingOrdersRef.current.delete(o.id);
-              });
-            // Remove from pending list immediately to prevent re-processing
-            // The backend will handle the actual activation
+            if (!activatingOrdersRef.current.has(o.id)) {
+              activatingOrdersRef.current.add(o.id);
+              setToast({ type:"ENTRY_HIT", id:Date.now(), symbol:o.symbol, tradeType:o.type, entryStr:o.entryStr, tpStr:o.tpStr||"–", slStr:o.slStr||"–", lot:o.lot, vol:o.vol });
+              setTimeout(()=>setToast(p=>p?.type==="ENTRY_HIT"?null:p), 4000);
+              ordersAPI.activate(o.id, cur)
+                .then(() => { fetchTrades(); fetchWallet(); })
+                .catch(() => {})
+                .finally(() => {
+                  activatingOrdersRef.current.delete(o.id);
+                  fetchPending();
+                });
+            }
+            // Always remove from local pending so interval doesn't re-trigger
           } else {
             stillPending.push(o);
           }
@@ -229,35 +221,18 @@ export default function TradingDashboard() {
           );
 
           if (tpHit || slHit) {
-            // Skip if this trade is already being closed
-            if (closingTradesRef.current.has(t.id)) {
-              remaining.push(updated);
-              continue;
-            }
-            
-            const pip2   = t.tpPrice != null ? Math.abs(Math.round((t.tpPrice - t.entryPrice)/pip)) : Math.abs(Math.round((t.slPrice - t.entryPrice)/pip));
-            const realPnl = tpHit ? Math.abs(pnl) : -Math.abs(pnl);
-            
-            // Mark as being closed to prevent duplicate processing
+            if (closingTradesRef.current.has(t.id)) continue;
             closingTradesRef.current.add(t.id);
-            
-            // Call backend to close the trade
-            tradesAPI.close(t.id)
-              .then(() => {
-                fetchTrades(); 
-                fetchWallet(); 
-                setResultToast({ id:Date.now(), hit:tpHit?"TP":"SL", pnl:realPnl, symbol:t.symbol, tradeType:t.type, pips:pip2 });
-                setTimeout(()=>setResultToast(null), 5000);
-              })
-              .catch(err => {
-                console.error('Failed to close trade on TP/SL hit:', err);
-                // If backend fails, add the trade back to the list
-                setOpenTrades(current => [...current, updated]);
-              })
-              .finally(() => {
-                // Always remove from the closing set, regardless of success/failure
-                closingTradesRef.current.delete(t.id);
-              });
+            const pip2     = t.tpPrice != null ? Math.abs(Math.round((t.tpPrice - t.entryPrice)/pip)) : Math.abs(Math.round((t.slPrice - t.entryPrice)/pip));
+            const realPnl  = tpHit ? Math.abs(pnl) : -Math.abs(pnl);
+            const hitPrice = tpHit ? t.tpPrice : t.slPrice;
+            const reason   = tpHit ? "TP" : "SL";
+            tradesAPI.close(t.id, hitPrice, reason)
+              .then(() => { fetchTrades(); fetchWallet(); })
+              .catch(() => { closingTradesRef.current.delete(t.id); })
+              .finally(() => { closingTradesRef.current.delete(t.id); });
+            setResultToast({ id:Date.now(), hit:reason, pnl:realPnl, symbol:t.symbol, tradeType:t.type, pips:pip2 });
+            setTimeout(()=>setResultToast(null), 5000);
           } else {
             remaining.push(updated);
           }
@@ -265,13 +240,7 @@ export default function TradingDashboard() {
         return remaining;
       });
     }, 600);
-    return () => {
-      clearInterval(id);
-      // Clean up any pending operations to prevent memory leaks
-      closingTradesRef.current.clear();
-      activatingOrdersRef.current.clear();
-      recentOrderIdsRef.current.clear();
-    };
+    return () => clearInterval(id);
   }, []);
 
   // Derived balances
@@ -365,7 +334,6 @@ export default function TradingDashboard() {
 
     try {
       isPlacingRef.current = true;
-      console.log(`Placing ${type} order for ${symbol} at ${entryP}`)
       const res = await ordersAPI.place({
         symbol,
         market,
@@ -379,12 +347,6 @@ export default function TradingDashboard() {
 
       const backendOrder = res.data;
       const id     = backendOrder.id;
-      console.log(`Order placed successfully: ${id}`)
-      
-      // Track this order ID to prevent duplicate processing
-      recentOrderIdsRef.current.add(id);
-      // Clean up after 5 seconds to prevent memory leak
-      setTimeout(() => recentOrderIdsRef.current.delete(id), 5000);
       const pipVal = LOT_SIZES.find(l=>l.label===lot)?.pip ?? 1;
       const margin = Math.max(50, pipVal * vol * 20);
 
@@ -399,8 +361,8 @@ export default function TradingDashboard() {
         pnl: 0, pips: 0, status: "pending",
       };
 
-      // Only fetch wallet to update balance, let polling handle pending orders
       fetchWallet();
+      fetchPending();
       setToast({ type:"PENDING", id, symbol, tradeType:type, entryStr:localOrder.entryStr, tpStr:localOrder.tpStr||"–", slStr:localOrder.slStr||"–", lot, vol });
       setTimeout(()=>setToast(p=>p?.id===id?null:p), 4000);
       resetOrder();
@@ -641,49 +603,76 @@ export default function TradingDashboard() {
         <div style={{position:"relative",zIndex:1}}>
 
           {/* ① Balance row */}
-          <div style={{padding:"12px 16px 10px",borderBottom:`1px solid ${C.border}`,display:"flex",alignItems:"center",gap:10}}>
-            <div style={{flex:1}}>
-              {/* eQual wordmark — top left */}
-              <div style={{marginBottom:8}}>
-                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 44" width="96" height="26">
-                  <defs>
-                    <linearGradient id="eGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-                      <stop offset="0%" stopColor="#38bdf8" stopOpacity="1"/>
-                      <stop offset="100%" stopColor="#0ea5c8" stopOpacity="1"/>
-                    </linearGradient>
-                    <linearGradient id="dotGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-                      <stop offset="0%" stopColor="#facc15" stopOpacity="1"/>
-                      <stop offset="100%" stopColor="#d97706" stopOpacity="1"/>
-                    </linearGradient>
-                    <filter id="eGlow" x="-20%" y="-20%" width="140%" height="140%">
-                      <feGaussianBlur stdDeviation="1.8" result="blur"/>
-                      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
-                    </filter>
-                    <filter id="dotGlow" x="-80%" y="-80%" width="260%" height="260%">
-                      <feGaussianBlur stdDeviation="2.5" result="blur"/>
-                      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
-                    </filter>
-                  </defs>
-                  <text x="2" y="34" fontFamily="Georgia,'Times New Roman',serif" fontSize="36" fontWeight="400" fontStyle="italic" fill="url(#eGrad)" filter="url(#eGlow)" letterSpacing="-1">e</text>
-                  <text x="24" y="34" fontFamily="Georgia,'Times New Roman',serif" fontSize="36" fontWeight="700" fill="#e8e8ff" letterSpacing="-1">Q</text>
-                  <text x="55" y="34" fontFamily="Georgia,'Times New Roman',serif" fontSize="36" fontWeight="400" fill="#c8c8ee" letterSpacing="-0.5">ual</text>
-                  <circle cx="51" cy="38" r="3.5" fill="url(#dotGrad)" filter="url(#dotGlow)"/>
-                  <line x1="2" y1="38.5" x2="22" y2="38.5" stroke="#38bdf8" strokeWidth="1.5" strokeLinecap="round" opacity="0.7"/>
-                </svg>
-              </div>
-              <div style={{display:"flex",justifyContent:"space-between",marginBottom:5}}>
-                <span style={{color:C.balLabel,fontSize:10,letterSpacing:1}}>ACCOUNT BALANCE</span>
-                <span style={{color:C.balVal,fontSize:13,fontWeight:"bold",letterSpacing:1}}>
-                  {balance>0 ? balFmt(balance) : <span style={{color:"#4a4a78"}}>ZAR 0,00</span>}
-                </span>
-              </div>
-              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                <span style={{color:C.balLabel,fontSize:10,letterSpacing:1}}>CURRENT BALANCE</span>
-                <span style={{color:currentBalance>balance?"#4ade80":currentBalance<balance?"#f87171":C.balVal,fontSize:13,fontWeight:"bold",letterSpacing:1}}>
-                  {balance>0 ? balFmt(currentBalance) : <span style={{color:"#4a4a78"}}>ZAR 0,00</span>}
-                </span>
-              </div>
-            </div>
+<div style={{padding:"12px 16px 10px",borderBottom:`1px solid ${C.border}`,display:"flex",alignItems:"center",gap:10}}>
+  <div style={{flex:1}}>
+    {/* eQual wordmark — top left */}
+    <div style={{marginBottom:8}}>
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 44" width="96" height="26">
+        <defs>
+          <linearGradient id="eGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stopColor="#38bdf8" stopOpacity="1"/>
+            <stop offset="100%" stopColor="#0ea5c8" stopOpacity="1"/>
+          </linearGradient>
+          <linearGradient id="dotGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stopColor="#facc15" stopOpacity="1"/>
+            <stop offset="100%" stopColor="#d97706" stopOpacity="1"/>
+          </linearGradient>
+          <filter id="eGlow" x="-20%" y="-20%" width="140%" height="140%">
+            <feGaussianBlur stdDeviation="1.8" result="blur"/>
+            <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+          </filter>
+          <filter id="dotGlow" x="-80%" y="-80%" width="260%" height="260%">
+            <feGaussianBlur stdDeviation="2.5" result="blur"/>
+            <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+          </filter>
+        </defs>
+        <text x="2" y="34" fontFamily="Georgia,'Times New Roman',serif" fontSize="36" fontWeight="400" fontStyle="italic" fill="url(#eGrad)" filter="url(#eGlow)" letterSpacing="-1">e</text>
+        <text x="24" y="34" fontFamily="Georgia,'Times New Roman',serif" fontSize="36" fontWeight="700" fill="#e8e8ff" letterSpacing="-1">Q</text>
+        <text x="55" y="34" fontFamily="Georgia,'Times New Roman',serif" fontSize="36" fontWeight="400" fill="#c8c8ee" letterSpacing="-0.5">ual</text>
+        <circle cx="51" cy="38" r="3.5" fill="url(#dotGrad)" filter="url(#dotGlow)"/>
+        <line x1="2" y1="38.5" x2="22" y2="38.5" stroke="#38bdf8" strokeWidth="1.5" strokeLinecap="round" opacity="0.7"/>
+      </svg>
+    </div>
+
+    {/* Account Balance */}
+    <div style={{display:"flex",justifyContent:"space-between",marginBottom:5}}>
+      <span style={{color:C.balLabel,fontSize:10,letterSpacing:1}}>ACCOUNT BALANCE</span>
+      <span style={{
+        color: balance<0 ? "#f87171" : balance===0 ? "#4a4a78" : C.balVal,
+        fontSize:13, fontWeight:"bold", letterSpacing:1
+      }}>
+        {balance===0
+          ? "ZAR 0,00"
+          : balance<0
+            ? `− ZAR ${Math.abs(balance).toLocaleString("en-ZA",{minimumFractionDigits:2,maximumFractionDigits:2})}`
+            : balFmt(balance)}
+      </span>
+    </div>
+
+    {/* Current Balance */}
+    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+      <span style={{color:C.balLabel,fontSize:10,letterSpacing:1}}>CURRENT BALANCE</span>
+      <span style={{
+        color: currentBalance<0 ? "#f87171" : currentBalance>balance ? "#4ade80" : C.balVal,
+        fontSize:13, fontWeight:"bold", letterSpacing:1
+      }}>
+        {currentBalance<0
+          ? `− ZAR ${Math.abs(currentBalance).toLocaleString("en-ZA",{minimumFractionDigits:2,maximumFractionDigits:2})}`
+          : balFmt(currentBalance)}
+      </span>
+    </div>
+
+    {/* Deficit warning */}
+    {balance<0 && (
+      <div style={{marginTop:6, padding:"5px 8px", background:"#2a080833", border:"1px solid #ef444444", borderRadius:6}}>
+        <span style={{color:"#f87171", fontSize:8, letterSpacing:1}}>
+          ⚠ ACCOUNT IN DEFICIT — DEPOSIT FUNDS BEFORE TRADING
+        </span>
+      </div>
+    )}
+  </div>
+
+
             {/* Peter AI button */}
             <button onClick={()=>setShowPeter(true)} style={{
               width:42,height:42,borderRadius:"50%",flexShrink:0,
@@ -878,41 +867,47 @@ export default function TradingDashboard() {
           )}
 
 
-          {/* ⑨ Wallet Bar */}
-          <div style={{ borderTop:`1px solid ${C.border}`, padding:"14px 16px" }}>
-            <button onClick={()=>setShowWallet(true)} style={{
-              width:"100%", padding:"14px 20px", borderRadius:10, cursor:"pointer",
-              background: balance>0
-                ? "linear-gradient(135deg,#061426,#082040)"
-                : "linear-gradient(135deg,#140e04,#201a04)",
-              border:`2px solid ${balance>0?"#38bdf8":"#facc15"}`,
-              fontFamily:"inherit", display:"flex", alignItems:"center", justifyContent:"space-between",
-              boxShadow:`0 0 22px ${balance>0?"#38bdf822":"#facc1522"}`,
-              transition:"all 0.2s",
-            }}>
-              <div style={{ display:"flex", alignItems:"center", gap:12 }}>
-                <span style={{ fontSize:20, color:balance>0?"#38bdf8":"#facc15" }}>⬡</span>
-                <div style={{ textAlign:"left" }}>
-                  <div style={{ color:balance>0?"#38bdf8":"#facc15", fontSize:11, fontWeight:"bold", letterSpacing:2 }}>
-                    {balance>0 ? "WALLET" : "⬡ DEPOSIT TO TRADE"}
-                  </div>
-                  <div style={{ color:balance>0?"#5090b8":"#8a7040", fontSize:9, marginTop:2, letterSpacing:1 }}>
-                    {balance>0 ? `${openTrades.length} open position${openTrades.length!==1?"s":""}` : "Tap to add simulation funds"}
-                  </div>
-                </div>
-              </div>
-              <div style={{ textAlign:"right" }}>
-                <div style={{ color:balance>0?"#c8e8ff":"#c8a840", fontSize:13, fontWeight:"bold", letterSpacing:1 }}>
-                  {balance>0 ? balFmt(currentBalance) : "ZAR 0,00"}
-                </div>
-                {balance>0 && totalPnl!==0 && (
-                  <div style={{ color:totalPnl>=0?"#4ade80":"#f87171", fontSize:9, marginTop:2 }}>
-                    {totalPnl>=0?"▲ +":"▼ "}{Math.abs(totalPnl).toFixed(2)} P&L
-                  </div>
-                )}
-              </div>
-            </button>
-          </div>
+         {/* ⑨ Wallet Bar */}
+<div style={{ borderTop:`1px solid ${C.border}`, padding:"14px 16px" }}>
+  <button onClick={()=>setShowWallet(true)} style={{
+    width:"100%", padding:"14px 20px", borderRadius:10, cursor:"pointer",
+    background: balance<0
+      ? "linear-gradient(135deg,#1a0606,#2d0a0a)"
+      : balance>0
+        ? "linear-gradient(135deg,#061426,#082040)"
+        : "linear-gradient(135deg,#140e04,#201a04)",
+    border:`2px solid ${balance<0?"#ef4444":balance>0?"#38bdf8":"#facc15"}`,
+    boxShadow:`0 0 22px ${balance<0?"#ef444422":balance>0?"#38bdf822":"#facc1522"}`,
+    fontFamily:"inherit", display:"flex", alignItems:"center", justifyContent:"space-between",
+    transition:"all 0.2s",
+  }}>
+    <div style={{ display:"flex", alignItems:"center", gap:12 }}>
+      <span style={{ fontSize:20, color:balance<0?"#ef4444":balance>0?"#38bdf8":"#facc15" }}>⬡</span>
+      <div style={{ textAlign:"left" }}>
+        <div style={{ color:balance<0?"#ef4444":balance>0?"#38bdf8":"#facc15", fontSize:11, fontWeight:"bold", letterSpacing:2 }}>
+          {balance<0 ? "⚠ ACCOUNT IN DEFICIT" : balance>0 ? "WALLET" : "⬡ DEPOSIT TO TRADE"}
+        </div>
+        <div style={{ color:balance<0?"#c08080":balance>0?"#5090b8":"#8a7040", fontSize:9, marginTop:2, letterSpacing:1 }}>
+          {balance<0
+            ? "Deposit funds to restore your account"
+            : balance>0
+              ? `${openTrades.length} open position${openTrades.length!==1?"s":""}`
+              : "Tap to add simulation funds"}
+        </div>
+      </div>
+    </div>
+    <div style={{ textAlign:"right" }}>
+      <div style={{ color:balance<0?"#f87171":balance>0?"#c8e8ff":"#c8a840", fontSize:13, fontWeight:"bold", letterSpacing:1 }}>
+        {balFmt(currentBalance)}
+      </div>
+      {totalPnl!==0 && (
+        <div style={{ color:totalPnl>=0?"#4ade80":"#f87171", fontSize:9, marginTop:2 }}>
+          {totalPnl>=0?"▲ +":"▼ "}{Math.abs(totalPnl).toFixed(2)} P&L
+        </div>
+      )}
+    </div>
+  </button>
+</div>
 
         </div>
       </div>
