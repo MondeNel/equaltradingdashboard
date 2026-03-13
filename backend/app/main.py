@@ -1,8 +1,7 @@
+import asyncio
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi import FastAPI
-
 from app.config import get_settings
 from app.database import engine, Base
 from app.routers.auth import router as auth_router
@@ -12,6 +11,7 @@ from app.routers.trades import router as trades_router
 from app.routers.prices import router as prices_router
 from app.routers.peter import router as peter_router
 from app.routers.subscriptions import router as subscriptions_router
+from app.services.price_service import realtime_price_updater
 
 settings = get_settings()
 
@@ -20,7 +20,10 @@ settings = get_settings()
 async def lifespan(app: FastAPI):
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+    # Start real-time price updater in background
+    task = asyncio.create_task(realtime_price_updater())
     yield
+    task.cancel()
     await engine.dispose()
 
 
@@ -47,9 +50,6 @@ app.include_router(prices_router)
 app.include_router(peter_router, prefix="/api")
 app.include_router(subscriptions_router)
 
-
-
-app.include_router(subscriptions_router)
 
 @app.get("/health")
 async def health_check():
