@@ -79,7 +79,6 @@ export default function CandleChart({ symbol, livePrice, entry, takeProfit, stop
       const next  = prev + pull + noise;
       driftRef.current = next;
 
-      // Notify parent so price display + P&L stay in sync with chart
       if (onPriceUpdate) onPriceUpdate(next);
 
       setCandles(prev => {
@@ -100,15 +99,28 @@ export default function CandleChart({ symbol, livePrice, entry, takeProfit, stop
     return () => clearInterval(id);
   }, []);
 
+  // Visible slice
   const total   = candles.length;
   const offset  = Math.min(panOffset, Math.max(0, total - zoomView));
   const start   = Math.max(0, total - zoomView - offset);
   const visible = candles.slice(start, start + zoomView);
   const isLive  = offset === 0;
 
-  const allP     = visible.flatMap(c => [c.high, c.low]);
-  const rawMin   = Math.min(...allP) * 0.9993;
-  const rawMax   = Math.max(...allP) * 1.0007;
+  // ── displayPrice must be declared BEFORE scale so pip padding can use it ──
+  const displayPrice = driftRef.current > 0 ? driftRef.current : livePrice;
+
+  // ── Scale — pip-aware padding so axis shows a tight, meaningful range ──────
+  const allP      = visible.flatMap(c => [c.high, c.low]);
+  const dataMin   = Math.min(...allP);
+  const dataMax   = Math.max(...allP);
+  const dataRange = dataMax - dataMin || 1;
+
+  // Pip size by price magnitude
+  const pip    = displayPrice > 10000 ? 1 : displayPrice > 100 ? 0.01 : 0.0001;
+  // 40 pips each side, but at least 15% of candle range so bodies never overflow
+  const pipPad   = Math.max(40 * pip, dataRange * 0.15);
+  const rawMin   = dataMin - pipPad;
+  const rawMax   = dataMax + pipPad;
   const rawRange = rawMax - rawMin || 1;
   const minP     = rawMin - vOffset * rawRange;
   const maxP     = rawMax - vOffset * rawRange;
@@ -206,7 +218,6 @@ export default function CandleChart({ symbol, livePrice, entry, takeProfit, stop
 
   const onLineDown = (key, e) => { e.preventDefault(); e.stopPropagation(); interactRef.current = { type:"line", key }; };
 
-  const displayPrice = driftRef.current > 0 ? driftRef.current : livePrice;
   const fmt = v => {
     if (v == null) return "";
     return displayPrice > 10000 ? v.toFixed(0) : displayPrice > 100 ? v.toFixed(2) : v.toFixed(4);

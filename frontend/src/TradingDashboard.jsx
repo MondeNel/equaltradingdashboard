@@ -248,14 +248,16 @@ export default function TradingDashboard() {
 
   // ── Pip / ZAR calc ─────────────────────────────────────────────────────────
   const calcPips = (a, b) => {
-    if (a == null || b == null || !lotSize) return null;
-    const diff = Math.abs(a - b);
-    if (!diff) return null;
-    const pip  = displayPrice < 10 ? 0.0001 : displayPrice < 200 ? 0.0001 : 1;
-    const pips = diff / pip;
-    const zar  = pips * lotSize.pip * volume * (symbol.includes("ZAR") ? 1 : USD_TO_ZAR);
-    return { pips: Math.round(pips), zar };
+  if (a == null || b == null) return null;
+  const diff = Math.abs(a - b);
+  if (!diff) return null;
+  const pip     = displayPrice < 10 ? 0.0001 : displayPrice < 200 ? 0.0001 : 1;
+  const pips    = diff / pip;
+  const activeLot = lotSize ?? LOT_SIZES.find(l => l.label === "Mini");  // default to Mini
+  const zar     = pips * (activeLot?.pip ?? 1) * volume * (symbol.includes("ZAR") ? 1 : USD_TO_ZAR);
+  return { pips: Math.round(pips), zar };
   };
+  
   const profitCalc = calcPips(entry, takeProfit);
   const lossCalc   = calcPips(entry, stopLoss);
 
