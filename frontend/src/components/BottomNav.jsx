@@ -1,5 +1,6 @@
 import { useNavigate, useLocation } from "react-router-dom";
 
+
 const TABS = [
   {
     id: "bet",
@@ -32,9 +33,9 @@ const TABS = [
     color: "#facc15",
     icon: (active) => (
       <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
-        <circle cx="4"  cy="9" r="2.5" stroke={active ? "#facc15" : "#3a3a60"} strokeWidth="1.3"/>
+        <circle cx="4" cy="9" r="2.5" stroke={active ? "#facc15" : "#3a3a60"} strokeWidth="1.3"/>
         <circle cx="14" cy="9" r="2.5" stroke={active ? "#facc15" : "#3a3a60"} strokeWidth="1.3"/>
-        <line x1="6.5" y1="7.5" x2="11.5" y2="6"  stroke={active ? "#facc15" : "#3a3a60"} strokeWidth="1" strokeDasharray="2,1.5"/>
+        <line x1="6.5" y1="7.5" x2="11.5" y2="6" stroke={active ? "#facc15" : "#3a3a60"} strokeWidth="1" strokeDasharray="2,1.5"/>
         <line x1="6.5" y1="10.5" x2="11.5" y2="12" stroke={active ? "#facc15" : "#3a3a60"} strokeWidth="1" strokeDasharray="2,1.5"/>
       </svg>
     ),
@@ -68,66 +69,73 @@ const TABS = [
 ];
 
 export default function BottomNav({ badges = {} }) {
-  const nav      = useNavigate();
+  const nav = useNavigate();
   const location = useLocation();
-  const current  = location.pathname;
+  const current = location.pathname;
 
   return (
-    <div style={{
-      position: "fixed", bottom: 0, left: 0, right: 0,
-      background: "#07070f",
-      borderTop: "1px solid #1e1e3a",
-      padding: "8px 0 max(12px, env(safe-area-inset-bottom))",
-      zIndex: 100,
-      display: "grid",
-      gridTemplateColumns: "repeat(5, 1fr)",
-      maxWidth: "480px",
-      margin: "0 auto",
-    }}>
-      {TABS.map(tab => {
-        const active = current === tab.route || (tab.route === "/home" && current === "/");
-        const badge  = badges[tab.id] || 0;
-        return (
-          <div
-            key={tab.id}
-            onClick={() => nav(tab.route)}
-            style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "4px", padding: "8px 4px", cursor: "pointer", position: "relative" }}
-          >
-            {/* Icon wrapper */}
-            <div style={{
-              width: "32px", height: "32px", borderRadius: "10px",
-              background: active ? `${tab.color}22` : "#0d0d20",
-              border: `1px solid ${active ? tab.color + "66" : "#2e2e58"}`,
-              display: "flex", alignItems: "center", justifyContent: "center",
-              transition: "all 0.2s",
-            }}>
-              {tab.icon(active)}
-            </div>
+    <div className="fixed bottom-0 left-0 right-0 flex justify-center z-50">
 
-            {/* Badge */}
-            {badge > 0 && (
-              <div style={{
-                position: "absolute", top: "4px", right: "8px",
-                width: "16px", height: "16px", borderRadius: "50%",
-                background: tab.color, display: "flex", alignItems: "center", justifyContent: "center",
-                fontSize: "8px", fontWeight: "bold", color: "#05050e",
-                fontFamily: "'Courier New', monospace",
-              }}>
-                {badge > 9 ? "9+" : badge}
+      <div className="w-full max-w-[480px] grid grid-cols-5 bg-[#07070f] border-t border-[#1e1e3a] pb-[max(12px,env(safe-area-inset-bottom))] pt-2">
+
+        {TABS.map((tab) => {
+          const active =
+            current === tab.route || (tab.route === "/home" && current === "/");
+
+          const badge = badges[tab.id] || 0;
+
+          return (
+            <div
+              key={tab.id}
+              onClick={() => nav(tab.route)}
+              className="flex flex-col items-center gap-1 py-2 relative cursor-pointer"
+            >
+              {/* ICON BOX */}
+              <div
+                className="w-8 h-8 rounded-lg flex items-center justify-center transition-all"
+                style={{
+                  background: active ? `${tab.color}22` : "#0d0d20",
+                  border: `1px solid ${active ? tab.color + "66" : "#2e2e58"}`,
+                }}
+              >
+                {tab.icon(active)}
               </div>
-            )}
 
-            <span style={{ fontSize: "7px", color: active ? tab.color : "#3a3a60", letterSpacing: "0.5px", fontFamily: "'Courier New', monospace", fontWeight: active ? "bold" : "normal" }}>
-              {tab.label}
-            </span>
+              {/* BADGE */}
+              {badge > 0 && (
+                <div
+                  className="absolute top-1 right-3 w-4 h-4 rounded-full flex items-center justify-center text-[8px] font-bold"
+                  style={{
+                    background: tab.color,
+                    color: "#05050e",
+                  }}
+                >
+                  {badge > 9 ? "9+" : badge}
+                </div>
+              )}
 
-            {/* Active underline */}
-            {active && (
-              <div style={{ position: "absolute", bottom: 0, width: "20px", height: "2px", background: tab.color, borderRadius: "1px" }} />
-            )}
-          </div>
-        );
-      })}
+              {/* LABEL */}
+              <span
+                className="text-[7px] tracking-wide font-mono"
+                style={{
+                  color: active ? tab.color : "#3a3a60",
+                  fontWeight: active ? "bold" : "normal",
+                }}
+              >
+                {tab.label}
+              </span>
+
+              {/* ACTIVE LINE */}
+              {active && (
+                <div
+                  className="absolute bottom-0 w-5 h-[2px] rounded"
+                  style={{ background: tab.color }}
+                />
+              )}
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
