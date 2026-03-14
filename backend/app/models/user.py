@@ -1,35 +1,28 @@
 import uuid
-from datetime import datetime, timezone
-from sqlalchemy import Boolean, DateTime, String
+from sqlalchemy import Column, String, DateTime, func
 from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy.orm import Mapped, mapped_column, relationship
-
-from app.database import Base
-
+from sqlalchemy.orm import relationship
+from ..database import Base
 
 class User(Base):
     __tablename__ = "users"
 
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
-    )
-    email: Mapped[str] = mapped_column(String(255), unique=True, nullable=False, index=True)
-    hashed_password: Mapped[str] = mapped_column(String(255), nullable=False)
-    display_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
-    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        default=lambda: datetime.now(timezone.utc),
-        nullable=False,
-    )
+    id              = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    email           = Column(String, unique=True, nullable=False, index=True)
+    hashed_password = Column(String, nullable=False)
+    display_name    = Column(String(100), nullable=True)
+    country         = Column(String(100), default="South Africa")
+    currency_code   = Column(String(10),  default="ZAR")
+    currency_symbol = Column(String(5),   default="R")
+    created_at      = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at      = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
-    # Relationships
-    wallet: Mapped["Wallet"] = relationship("Wallet", back_populates="user", uselist=False)
-    pending_orders: Mapped[list["PendingOrder"]] = relationship("PendingOrder", back_populates="user")
-    open_trades: Mapped[list["OpenTrade"]] = relationship("OpenTrade", back_populates="user")
-    trade_history: Mapped[list["TradeHistory"]] = relationship("TradeHistory", back_populates="user")
-    transactions: Mapped[list["Transaction"]] = relationship("Transaction", back_populates="user")
-    subscription: Mapped["Subscription"] = relationship("Subscription", back_populates="user", uselist=False)
+    subscription   = relationship("Subscription",  back_populates="user", uselist=False)
+    wallet         = relationship("Wallet",         back_populates="user", uselist=False)
+    pending_orders = relationship("PendingOrder",   back_populates="user")
+    open_trades    = relationship("OpenTrade",      back_populates="user")
+    trade_history  = relationship("TradeHistory",   back_populates="user")
+    transactions   = relationship("Transaction",    back_populates="user")
 
-    def __repr__(self) -> str:
+    def __repr__(self):
         return f"<User {self.email}>"

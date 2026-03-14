@@ -1,19 +1,39 @@
-import { useEffect } from 'react'
-import useAuthStore from './store/authStore'
-import Login from './pages/Login'
-import TradingDashboard from './TradingDashboard'
+import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { useState, useEffect } from "react";
+import RegisterPage  from "./pages/RegisterPage";
+import LoginPage     from "./pages/LoginPage";
+import LandingPage   from "./pages/LandingPage";
+import TradingPage   from "./pages/TradingPage";
+import ProfilePage   from "./pages/ProfilePage";
 
+// ── Auth guard ────────────────────────────────────────────────────────────────
+function PrivateRoute({ children }) {
+  const token = localStorage.getItem("equal_token");
+  return token ? children : <Navigate to="/login" replace />;
+}
+
+function PublicRoute({ children }) {
+  const token = localStorage.getItem("equal_token");
+  return token ? <Navigate to="/home" replace /> : children;
+}
+
+// ── App ───────────────────────────────────────────────────────────────────────
 export default function App() {
-  const { token, user, loadUser } = useAuthStore()
+  return (
+    <BrowserRouter>
+      <Routes>
+        {/* Public routes */}
+        <Route path="/register" element={<PublicRoute><RegisterPage /></PublicRoute>} />
+        <Route path="/login"    element={<PublicRoute><LoginPage /></PublicRoute>} />
 
-  // On mount — if token exists, load the user profile
-  useEffect(() => {
-    if (token && !user) loadUser()
-  }, [])
+        {/* Protected routes */}
+        <Route path="/home"    element={<PrivateRoute><LandingPage /></PrivateRoute>} />
+        <Route path="/trade"   element={<PrivateRoute><TradingPage /></PrivateRoute>} />
+        <Route path="/profile" element={<PrivateRoute><ProfilePage /></PrivateRoute>} />
 
-  // Not logged in — show login
-  if (!token || !user) return <Login />
-
-  // Logged in — show dashboard
-  return <TradingDashboard />
+        {/* Default redirect */}
+        <Route path="*" element={<Navigate to="/login" replace />} />
+      </Routes>
+    </BrowserRouter>
+  );
 }

@@ -1,84 +1,107 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException
+from fastapi.security import OAuth2PasswordRequestForm, OAuth2PasswordBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from pydantic import BaseModel, EmailStr
+from typing import Optional
+import bcrypt
+from datetime import datetime, timedelta
+import jwt
+import os
 
-from app.database import get_db
-from app.models.user import User
-from app.models.wallet import Wallet
-from app.models.subscription import Subscription
-from app.schemas.auth import LoginRequest, RegisterRequest, RefreshRequest, TokenResponse, UserResponse
-from app.services.auth_service import (
-    create_access_token, create_refresh_token,
-    decode_refresh_token, hash_password, verify_password,
-)
-from app.dependencies import get_current_user
+from ..database import get_db
+from ..models.user import User
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
+SECRET_KEY   = os.getenv("SECRET_KEY", "change-me-in-production")
+ALGORITHM    = "HS256"
+TOKEN_EXPIRE = timedelta(days=30)
 
-@router.post("/register", response_model=TokenResponse, status_code=status.HTTP_201_CREATED)
-async def register(req: RegisterRequest, db: AsyncSession = Depends(get_db)):
-    # Check duplicate email
-    existing = await db.execute(select(User).where(User.email == req.email))
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
+
+
+class RegisterRequest(BaseModel):
+    display_name:    str
+    email:           EmailStr
+    password:        str
+    country:         Optional[str] = "South Africa"
+    currency_code:   Optional[str] = "ZAR"
+    currency_symbol: Optional[str] = "R"
+
+
+def hash_password(plain: str) -> str:
+    return bcrypt.hashpw(plain.encode(), bcrypt.gensalt()).decode()
+
+def verify_password(plain: str, hashed: str) -> bool:
+    return bcrypt.checkpw(plain.encode(), hashed.encode())
+
+def create_token(user_id: str) -> str:
+    return jwt.encode(
+        {"sub": user_id, "exp": datetime.utcnow() + TOKEN_EXPIRE},
+        SECRET_KEY, algorithm=ALGORITHM
+    )
+
+async def get_current_user(
+    token: str = Depends(oauth2_scheme),
+    db: AsyncSession = Depends(get_db),
+) -> User:
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        user_id = payload.get("sub")
+    except jwt.PyJWTError:
+        raise HTTPException(status_code=401, detail="Invalid token")
+    result = await db.execute(select(User).where(User.id == user_id))
+    user   = result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=401, detail="User not found")
+    return user
+
+
+@router.post("/register", status_code=201)
+async def register(data: RegisterRequest, db: AsyncSession = Depends(get_db)):
+    existing = await db.execute(select(User).where(User.email == data.email))
     if existing.scalar_one_or_none():
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email already registered")
-
+        raise HTTPException(status_code=400, detail="Email already registered")
+    if len(data.password) < 8:
+        raise HTTPException(status_code=400, detail="Password must be at least 8 characters")
     user = User(
-        email=req.email,
-        hashed_password=hash_password(req.password),
-        display_name=req.display_name,
+        email           = data.email,
+        hashed_password = hash_password(data.password),
+        display_name    = data.display_name.strip(),
+        country         = data.country,
+        currency_code   = data.currency_code,
+        currency_symbol = data.currency_symbol,
     )
     db.add(user)
-    await db.flush()
-
-    # Auto-create wallet and subscription
-    db.add(Wallet(user_id=user.id))
-    db.add(Subscription(user_id=user.id))
-    await db.flush()
-
-    return TokenResponse(
-        access_token=create_access_token(user.id),
-        refresh_token=create_refresh_token(user.id),
-    )
-
-
-@router.post("/login", response_model=TokenResponse)
-async def login(req: LoginRequest, db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(User).where(User.email == req.email))
-    user = result.scalar_one_or_none()
-
-    if not user or not verify_password(req.password, user.hashed_password):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid email or password",
-        )
-
-    if not user.is_active:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Account inactive")
-
-    return TokenResponse(
-        access_token=create_access_token(user.id),
-        refresh_token=create_refresh_token(user.id),
-    )
+    await db.commit()
+    await db.refresh(user)
+    return {
+        "id":              str(user.id),
+        "email":           user.email,
+        "display_name":    user.display_name,
+        "country":         user.country,
+        "currency_code":   user.currency_code,
+        "currency_symbol": user.currency_symbol,
+    }
 
 
-@router.post("/refresh", response_model=TokenResponse)
-async def refresh(req: RefreshRequest, db: AsyncSession = Depends(get_db)):
-    user_id = decode_refresh_token(req.refresh_token)
-    if not user_id:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token")
-
-    result = await db.execute(select(User).where(User.id == user_id))
-    user = result.scalar_one_or_none()
-    if not user or not user.is_active:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
-
-    return TokenResponse(
-        access_token=create_access_token(user.id),
-        refresh_token=create_refresh_token(user.id),
-    )
+@router.post("/login")
+async def login(form: OAuth2PasswordRequestForm = Depends(), db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(User).where(User.email == form.username))
+    user   = result.scalar_one_or_none()
+    if not user or not verify_password(form.password, user.hashed_password):
+        raise HTTPException(status_code=401, detail="Invalid email or password")
+    return {"access_token": create_token(str(user.id)), "token_type": "bearer"}
 
 
-@router.get("/me", response_model=UserResponse)
+@router.get("/me")
 async def me(current_user: User = Depends(get_current_user)):
-    return current_user
+    return {
+        "id":              str(current_user.id),
+        "email":           current_user.email,
+        "display_name":    current_user.display_name,
+        "country":         current_user.country,
+        "currency_code":   current_user.currency_code,
+        "currency_symbol": current_user.currency_symbol,
+    }
