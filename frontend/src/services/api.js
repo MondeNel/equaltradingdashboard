@@ -16,10 +16,18 @@ api.interceptors.response.use(
   res => res,
   err => {
     if (err.response?.status === 401) {
+      const url = err.config?.url || "";
+      const isAuthRoute = url.includes("/api/auth/");
       const hadToken = !!localStorage.getItem("equal_token");
-      localStorage.removeItem("equal_token");
-      localStorage.removeItem("equal_user");
-      if (hadToken) window.location.href = "/login";
+      // Only clear + redirect if it's an auth failure, not a missing wallet/subscription
+      if (hadToken && !isAuthRoute) {
+        const isDataRoute = url.includes("/api/wallet") || url.includes("/api/subscriptions");
+        if (!isDataRoute) {
+          localStorage.removeItem("equal_token");
+          localStorage.removeItem("equal_user");
+          window.location.href = "/login";
+        }
+      }
     }
     return Promise.reject(err);
   }
