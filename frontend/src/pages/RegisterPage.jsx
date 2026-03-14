@@ -106,13 +106,14 @@ export default function RegisterPage() {
       currency_symbol: form.currency_symbol,
     });
 
-    const login = await authAPI.login(form.email.trim().toLowerCase(), form.password);
-    localStorage.setItem("equal_token", login.data.access_token);
+const login = await authAPI.login(form.email.trim().toLowerCase(), form.password);
+const token = login.data.access_token;
+localStorage.setItem("equal_token", token);
 
-    const me = await authAPI.me();
-    localStorage.setItem("equal_user", JSON.stringify(me.data));
+const me = await authAPI.me();
+localStorage.setItem("equal_user", JSON.stringify(me.data));
 
-    nav("/home");
+nav("/home");
   } catch (e) {
     const detail = e.response?.data?.detail;
     const msg = Array.isArray(detail)
