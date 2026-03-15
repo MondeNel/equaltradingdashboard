@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import BottomNav from "../components/BottomNav";
 import { walletAPI, subscriptionAPI } from "../services/api";
-import { getUser, COUNTRIES } from "../constants";
+import { getUser } from "../constants";
 import TradeHistory from "../components/TradeHistory";
 
 import {
@@ -10,230 +10,101 @@ import {
   Globe,
   Bell,
   Crown,
-  Moon,
   Shield,
   HelpCircle,
   Info,
   Camera,
   LogOut,
-  CheckCircle,
   MapPin,
   Star,
 } from "lucide-react";
 
-/**
- * Section label
- */
-function SectionLabel({ children }) {
-  return (
-    <div
-      style={{
-        fontSize: "11px",
-        fontWeight: "600",
-        color: "#8e8ea0",
-        margin: "22px 0 10px",
-        textTransform: "uppercase",
-        letterSpacing: "1px",
-      }}
-    >
-      {children}
-    </div>
-  );
-}
-
-/**
- * Stat card
- */
-function StatBox({ label, value }) {
-  return (
-    <div style={{ textAlign: "center", padding: "10px 0" }}>
-      <div style={{ fontWeight: "600", fontSize: "16px", color: "#fff" }}>
-        {value}
-      </div>
-
-      <div style={{ fontSize: "11px", color: "#8e8ea0", marginTop: "3px" }}>
-        {label}
-      </div>
-    </div>
-  );
-}
-
-/**
- * Settings row
- */
-function SettingsRow({ icon: Icon, label, sub }) {
-  return (
-    <div
-      style={{
-        display: "flex",
-        alignItems: "center",
-        padding: "14px",
-        borderRadius: "12px",
-        background: "#0f0f18",
-        marginBottom: "10px",
-        cursor: "pointer",
-      }}
-    >
-      <Icon size={18} color="#a1a1aa" />
-
-      <div style={{ marginLeft: "12px", flex: 1 }}>
-        <div style={{ color: "#e4e4e7", fontSize: "14px" }}>{label}</div>
-
-        {sub && (
-          <div style={{ fontSize: "11px", color: "#71717a", marginTop: "2px" }}>
-            {sub}
-          </div>
-        )}
-      </div>
-
-      <div style={{ color: "#71717a" }}>›</div>
-    </div>
-  );
-}
-
-/**
- * Level progress card
- */
-function LevelCard({ level = 7, xp = 620, next = 1000 }) {
-  const progress = (xp / next) * 100;
-
-  return (
-    <div
-      style={{
-        background: "#0f0f18",
-        borderRadius: "14px",
-        padding: "14px",
-        border: "1px solid #1f1f2e",
-        marginTop: "16px",
-      }}
-    >
-      <div
-        style={{
-          fontSize: "12px",
-          color: "#38bdf8",
-          fontWeight: "600",
-          marginBottom: "6px",
-        }}
-      >
-        LEVEL {level} TRADER
-      </div>
-
-      <div
-        style={{
-          height: "8px",
-          background: "#1e1e2e",
-          borderRadius: "20px",
-          overflow: "hidden",
-        }}
-      >
-        <div
-          style={{
-            width: `${progress}%`,
-            height: "100%",
-            background: "linear-gradient(90deg,#38bdf8,#4ade80)",
-          }}
-        />
-      </div>
-
-      <div style={{ fontSize: "11px", color: "#8e8ea0", marginTop: "6px" }}>
-        {next - xp} XP to Level {level + 1}
-      </div>
-    </div>
-  );
-}
-
-/**
- * Win streak
- */
-function StreakCard({ streak = 9 }) {
-  return (
-    <div
-      style={{
-        background: "#0f0f18",
-        borderRadius: "14px",
-        padding: "14px",
-        border: "1px solid #1f1f2e",
-        marginTop: "12px",
-        display: "flex",
-        justifyContent: "space-between",
-      }}
-    >
-      <div>
-        <div style={{ fontSize: "12px", color: "#facc15", fontWeight: "600" }}>
-          WIN STREAK
-        </div>
-
-        <div style={{ fontSize: "18px", color: "#fff", fontWeight: "600" }}>
-          🔥 {streak} wins
-        </div>
-      </div>
-
-      <div style={{ fontSize: "11px", color: "#8e8ea0" }}>Keep it going</div>
-    </div>
-  );
-}
-
-/**
- * Achievements
- */
-function Achievements() {
-  const badges = [
-    { icon: "🎯", label: "First Trade" },
-    { icon: "🔥", label: "10 Wins" },
-    { icon: "🏆", label: "Top Trader" },
-    { icon: "💰", label: "Profit Master" },
-  ];
-
-  return (
-    <div style={{ marginTop: "16px" }}>
-      <div
-        style={{
-          fontSize: "12px",
-          color: "#38bdf8",
-          fontWeight: "600",
-          marginBottom: "10px",
-        }}
-      >
-        ACHIEVEMENTS
-      </div>
-
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(4,1fr)",
-          gap: "10px",
-        }}
-      >
-        {badges.map((b, i) => (
-          <div
-            key={i}
-            style={{
-              background: "#0f0f18",
-              borderRadius: "10px",
-              padding: "10px",
-              textAlign: "center",
-              border: "1px solid #1f1f2e",
-              fontSize: "11px",
-            }}
-          >
-            <div style={{ fontSize: "20px" }}>{b.icon}</div>
-            <div style={{ marginTop: "4px", color: "#8e8ea0" }}>{b.label}</div>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-/**
- * Mock trades
- */
 const trades = [
   { symbol: "BTC", pnl: 520, date: "2026-03-10" },
   { symbol: "ETH", pnl: -120, date: "2026-03-09" },
   { symbol: "SOL", pnl: 240, date: "2026-03-08" },
   { symbol: "ADA", pnl: -60, date: "2026-03-05" },
 ];
+
+/**
+ * Returns formatted PnL with + or - sign in local currency
+ */
+function formatPnL(amount, currency = "ZAR") {
+  const formatter = new Intl.NumberFormat(undefined, {
+    style: "currency",
+    currency,
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+
+  return amount >= 0 ? `+${formatter.format(amount)}` : `${formatter.format(amount)}`;
+}
+
+// Example usage in JSX
+trades.map((trade, index) => (
+  <div key={index} className="flex justify-between py-2 border-b border-gray-700">
+    <div className="text-white font-medium">{trade.symbol}/USD</div>
+    <div
+      className={`font-semibold ${
+        trade.pnl >= 0 ? "text-green-400" : "text-red-500"
+      }`}
+    >
+      {formatPnL(trade.pnl, "ZAR")}
+    </div>
+    <div className="text-gray-400 text-xs">{trade.date}</div>
+  </div>
+));
+
+function SectionLabel({ children }) {
+  return <div className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider my-5">{children}</div>;
+}
+
+function StatBox({ label, value }) {
+  return (
+    <div className="text-center py-2">
+      <div className="text-white font-semibold text-base">{value}</div>
+      <div className="text-gray-400 text-[11px] mt-1">{label}</div>
+    </div>
+  );
+}
+
+function SettingsRow({ icon: Icon, label, sub }) {
+  return (
+    <div className="flex items-center p-4 rounded-xl bg-gray-800 mb-2 cursor-pointer">
+      <Icon size={18} color="#a1a1aa" />
+      <div className="ml-3 flex-1">
+        <div className="text-gray-100 text-sm">{label}</div>
+        {sub && <div className="text-gray-500 text-[11px] mt-1">{sub}</div>}
+      </div>
+      <div className="text-gray-500">›</div>
+    </div>
+  );
+}
+
+function LevelCard({ level = 77, xp = 620, next = 1000 }) {
+  const progress = (xp / next) * 100;
+  return (
+    <div className="bg-gray-800 rounded-xl p-3 border border-gray-700 mt-4">
+      <div className="text-[12px] font-semibold text-sky-400 mb-1">LEVEL {level} TRADER</div>
+      <div className="h-2 bg-gray-700 rounded-full overflow-hidden">
+        <div className="h-full bg-gradient-to-r from-sky-400 to-green-400" style={{ width: `${progress}%` }} />
+      </div>
+      <div className="text-gray-400 text-[11px] mt-1">{next - xp} XP to Level {level + 1}</div>
+    </div>
+  );
+}
+
+function StreakCard({ streak = 3 }) {
+  return (
+    <div className="bg-gray-800 rounded-xl p-3 border border-gray-700 mt-3 flex justify-between">
+      <div>
+        <div className="text-[12px] font-semibold text-yellow-400">WIN STREAK</div>
+        <div className="text-white text-lg font-semibold">{streak} Wins</div>
+      </div>
+      <div className="text-gray-400 text-[11px] self-center">Keep it going</div>
+    </div>
+  );
+}
 
 export default function ProfilePage() {
   const navigate = useNavigate();
@@ -250,12 +121,7 @@ export default function ProfilePage() {
   }, []);
 
   const followers = user?.followers ?? 8200;
-  const winRate = user?.win_rate ?? 94;
   const starRating = user?.star_rating ?? 4.9;
-
-  const formatFollowers = (n) =>
-    n >= 1000 ? `${(n / 1000).toFixed(1)}K` : n;
-
   const initials = (user?.display_name || "U")
     .split(" ")
     .map((w) => w[0])
@@ -263,10 +129,11 @@ export default function ProfilePage() {
     .toUpperCase()
     .slice(0, 2);
 
+  const formatFollowers = (n) => (n >= 1000 ? `${(n / 1000).toFixed(1)}K` : n);
+
   const handleAvatarUpload = (e) => {
     const file = e.target.files[0];
     if (!file) return;
-
     const reader = new FileReader();
     reader.onload = () => setAvatar(reader.result);
     reader.readAsDataURL(file);
@@ -277,208 +144,97 @@ export default function ProfilePage() {
     navigate("/login");
   };
 
+  const handleGetVerified = () => {
+    alert("Redirect to payment/verification flow");
+  };
+
   return (
-    <div
-      style={{
-        minHeight: "100vh",
-        background: "#05050e",
-        paddingBottom: "90px",
-        maxWidth: "420px",
-        margin: "0 auto",
-      }}
-    >
-      {/* HEADER */}
+    <div className="min-h-screen font-sans">
+      <div className="bg-[#05050e] pb-24 max-w-md mx-auto">
+        {/* HEADER */}
+        <div className="p-5 flex flex-col gap-3">
+          <div className="flex items-center gap-4 justify-between">
+            <div className="flex items-center gap-4">
+              <div className="relative">
+                <div
+                  onClick={() => fileRef.current.click()}
+                  className="w-16 h-16 rounded-full overflow-hidden bg-gradient-to-br from-sky-400 to-cyan-600 flex items-center justify-center text-lg font-semibold text-[#05050e] cursor-pointer"
+                >
+                  {avatar ? <img src={avatar} alt="avatar" className="w-full h-full object-cover" /> : initials}
+                </div>
+                <div
+                  onClick={() => fileRef.current.click()}
+                  className="absolute bottom-0 right-0 w-6 h-6 rounded-full bg-gray-900 border-2 border-[#05050e] flex items-center justify-center"
+                >
+                  <Camera size={12} color="#e4e4e7" />
+                </div>
+                <input ref={fileRef} hidden type="file" onChange={handleAvatarUpload} />
+              </div>
 
-      <div style={{ padding: "24px 20px" }}>
-        <div style={{ display: "flex", alignItems: "center" }}>
-          {/* Avatar */}
-
-          <div style={{ position: "relative" }}>
-            <div
-              onClick={() => fileRef.current.click()}
-              style={{
-                width: "78px",
-                height: "78px",
-                borderRadius: "50%",
-                overflow: "hidden",
-                background: "linear-gradient(135deg,#38bdf8,#0ea5c8)",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                fontSize: "22px",
-                fontWeight: "600",
-                color: "#05050e",
-                cursor: "pointer",
-              }}
-            >
-              {avatar ? (
-                <img
-                  src={avatar}
-                  alt="avatar"
-                  style={{ width: "100%", height: "100%", objectFit: "cover" }}
-                />
-              ) : (
-                initials
-              )}
+              <div className="flex-1">
+                <div className="text-white font-semibold text-base">{user?.display_name || "Trader"}</div>
+                <div className="flex items-center gap-1 mt-1 text-gray-400 text-xs">
+                  <MapPin size={8} />
+                  {(user?.city || "Cape Town").toUpperCase()} · ZAR
+                </div>
+                <div className="flex items-center gap-3 mt-2 text-xs font-medium">
+                  <div className="flex items-center gap-1 text-yellow-400">
+                    <Star size={8} fill="#facc15" stroke="#facc15" />
+                    {starRating}
+                  </div>
+                  <div className="text-blue-400">{formatFollowers(followers)} Followers</div>
+                </div>
+              </div>
             </div>
 
-            <div
-              onClick={() => fileRef.current.click()}
-              style={{
-                position: "absolute",
-                bottom: 0,
-                right: 0,
-                width: "26px",
-                height: "26px",
-                borderRadius: "50%",
-                background: "#0f0f18",
-                border: "2px solid #05050e",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-              }}
+            {/* Get Verified Button */}
+            <button
+              onClick={handleGetVerified}
+              className="px-3 py-1 bg-blue-600 text-white text-xs font-semibold rounded-lg hover:bg-blue-500 transition"
             >
-              <Camera size={13} color="#e4e4e7" />
-            </div>
-
-            <input ref={fileRef} hidden type="file" onChange={handleAvatarUpload} />
+              Get Verified
+            </button>
           </div>
 
-          {/* User Info */}
+          <div className="grid grid-cols-3 mt-4 border-t border-gray-800 pt-3">
+            <StatBox label="Trades" value="142" />
+            <StatBox label="PnL" value="R142K" />
+            <StatBox label="Rank" value="#77" />
+          </div>
 
-          <div style={{ marginLeft: "16px", flex: 1 }}>
-            <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-              <div
-                style={{
-                  fontWeight: "600",
-                  fontSize: "17px",
-                  color: "#ffffff",
-                  letterSpacing: "-0.2px",
-                }}
-              >
-                {user?.display_name || "Trader"}
-              </div>
+          <LevelCard />
+          <StreakCard />
+        </div>
 
-              <CheckCircle size={15} color="#38bdf8" />
-            </div>
+        <TradeHistory trades={trades} />
 
-            {/* Location */}
+        {/* SETTINGS */}
+        <div className="px-5">
+          <SectionLabel>Account</SectionLabel>
+          <SettingsRow icon={User} label="Edit Profile" />
+          <SettingsRow icon={Globe} label="Country & Currency" />
+          <SettingsRow icon={Bell} label="Notifications" />
+          <SettingsRow icon={Crown} label="Subscription" sub={subscription?.plan || "FREE"} />
 
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: "5px",
-                marginTop: "4px",
-                fontSize: "12px",
-                color: "#9ca3af",
-                fontWeight: "500",
-              }}
-            >
-              <MapPin size={12} />
-              {(user?.city || "Johannesburg").toUpperCase()} · ZAR
-            </div>
+          <SectionLabel>Security</SectionLabel>
+          <SettingsRow icon={Shield} label="Security" sub="Password & 2FA" />
 
-            {/* Reputation Row */}
+          <SectionLabel>Support</SectionLabel>
+          <SettingsRow icon={HelpCircle} label="Help Center" />
+          <SettingsRow icon={Info} label="About eQual" sub="v1.0.0" />
+        </div>
 
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: "14px",
-                marginTop: "8px",
-                fontSize: "12px",
-                fontWeight: "500",
-              }}
-            >
-              <div
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: "4px",
-                  color: "#facc15",
-                }}
-              >
-                <Star size={13} fill="#facc15" stroke="#facc15" />
-                {starRating}
-              </div>
-
-              <div style={{ color: "#4ade80" }}>{winRate}% Win</div>
-
-              <div style={{ color: "#60a5fa" }}>
-                {formatFollowers(followers)} Followers
-              </div>
-            </div>
+        <div className="px-5 mt-4">
+          <div
+            onClick={handleSignOut}
+            className="bg-red-900 p-4 rounded-xl text-center text-red-400 font-semibold cursor-pointer flex items-center justify-center gap-2"
+          >
+            <LogOut size={16} /> Sign Out
           </div>
         </div>
 
-        {/* Stats */}
-
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "1fr 1fr 1fr",
-            marginTop: "18px",
-            borderTop: "1px solid #111827",
-            paddingTop: "14px",
-          }}
-        >
-          <StatBox label="Trades" value="142" />
-          <StatBox label="PnL" value="R142K" />
-          <StatBox label="Rank" value="#1" />
-        </div>
-
-        <LevelCard />
-        <StreakCard />
-        <Achievements />
+        <BottomNav />
       </div>
-
-      <TradeHistory trades={trades} />
-
-      {/* SETTINGS */}
-
-      <div style={{ padding: "0 20px" }}>
-        <SectionLabel>Account</SectionLabel>
-
-        <SettingsRow icon={User} label="Edit Profile" />
-        <SettingsRow icon={Globe} label="Country & Currency" />
-        <SettingsRow icon={Bell} label="Notifications" />
-        <SettingsRow
-          icon={Crown}
-          label="Subscription"
-          sub={subscription?.plan || "FREE"}
-        />
-
-        <SectionLabel>Security</SectionLabel>
-
-        <SettingsRow icon={Shield} label="Security" sub="Password & 2FA" />
-
-        <SectionLabel>Support</SectionLabel>
-
-        <SettingsRow icon={HelpCircle} label="Help Center" />
-        <SettingsRow icon={Info} label="About eQual" sub="v1.0.0" />
-      </div>
-
-      {/* LOGOUT */}
-
-      <div style={{ padding: "20px" }}>
-        <div
-          onClick={handleSignOut}
-          style={{
-            background: "#1a0f13",
-            padding: "14px",
-            borderRadius: "12px",
-            textAlign: "center",
-            color: "#f87171",
-            fontWeight: "600",
-            cursor: "pointer",
-          }}
-        >
-          <LogOut size={16} /> Sign Out
-        </div>
-      </div>
-
-      <BottomNav />
     </div>
   );
 }
