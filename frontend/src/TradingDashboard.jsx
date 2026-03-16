@@ -552,31 +552,6 @@ export default function TradingDashboard() {
           <div style={{padding:"12px 16px 10px",borderBottom:`1px solid ${C.border}`,display:"flex",alignItems:"center",gap:10}}>
             <div style={{flex:1}}>
               <div style={{marginBottom:8}}>
-                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 44" width="96" height="26">
-                  <defs>
-                    <linearGradient id="eGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-                      <stop offset="0%" stopColor="#38bdf8" stopOpacity="1"/>
-                      <stop offset="100%" stopColor="#0ea5c8" stopOpacity="1"/>
-                    </linearGradient>
-                    <linearGradient id="dotGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-                      <stop offset="0%" stopColor="#facc15" stopOpacity="1"/>
-                      <stop offset="100%" stopColor="#d97706" stopOpacity="1"/>
-                    </linearGradient>
-                    <filter id="eGlow" x="-20%" y="-20%" width="140%" height="140%">
-                      <feGaussianBlur stdDeviation="1.8" result="blur"/>
-                      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
-                    </filter>
-                    <filter id="dotGlow" x="-80%" y="-80%" width="260%" height="260%">
-                      <feGaussianBlur stdDeviation="2.5" result="blur"/>
-                      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
-                    </filter>
-                  </defs>
-                  <text x="2" y="34" fontFamily="Georgia,'Times New Roman',serif" fontSize="36" fontWeight="400" fontStyle="italic" fill="url(#eGrad)" filter="url(#eGlow)" letterSpacing="-1">e</text>
-                  <text x="24" y="34" fontFamily="Georgia,'Times New Roman',serif" fontSize="36" fontWeight="700" fill="#e8e8ff" letterSpacing="-1">Q</text>
-                  <text x="55" y="34" fontFamily="Georgia,'Times New Roman',serif" fontSize="36" fontWeight="400" fill="#c8c8ee" letterSpacing="-0.5">ual</text>
-                  <circle cx="51" cy="38" r="3.5" fill="url(#dotGrad)" filter="url(#dotGlow)"/>
-                  <line x1="2" y1="38.5" x2="22" y2="38.5" stroke="#38bdf8" strokeWidth="1.5" strokeLinecap="round" opacity="0.7"/>
-                </svg>
               </div>
               <div style={{display:"flex",justifyContent:"space-between",marginBottom:5}}>
                 <span style={{color:C.balLabel,fontSize:10,letterSpacing:1}}>ACCOUNT BALANCE</span>
